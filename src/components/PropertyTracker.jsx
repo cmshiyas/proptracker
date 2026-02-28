@@ -606,6 +606,10 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
               style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:8, padding:"6px 14px", color:"#16a34a", cursor:"pointer", fontSize:13, fontWeight:500, marginLeft:8 }}>
               &#128200; Purchase Costs
             </button>
+            <button onClick={()=>onNavigate && onNavigate("suburb-profiles")}
+              style={{ background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:8, padding:"6px 14px", color:"#0369a1", cursor:"pointer", fontSize:13, fontWeight:500 }}>
+              &#127968; Suburb Profiles
+            </button>
           </div>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
             {isAdmin && (

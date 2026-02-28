@@ -69,3 +69,12 @@ export async function loadPurchaseCosts() {
 export async function savePurchaseCosts(data) {
   await setDoc(doc(db, "settings", "purchase_costs"), data);
 }
+
+// ── Suburb Profiles ────────────────────────────────────────────────────────────
+export async function loadSuburbProfiles() {
+  const snap = await getDoc(doc(db, "settings", "suburb_profiles"));
+  return snap.exists() ? snap.data().profiles || [] : [];
+}
+export async function saveSuburbProfiles(profiles) {
+  await setDoc(doc(db, "settings", "suburb_profiles"), { profiles });
+}

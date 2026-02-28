@@ -4,7 +4,8 @@ import { onAuthStateChanged } from "firebase/auth";
 import AuthScreen    from "./components/AuthScreen.jsx";
 import PendingScreen from "./components/PendingScreen.jsx";
 import PropertyTracker from "./components/PropertyTracker.jsx";
-import PurchaseCosts   from "./components/PurchaseCosts.jsx";
+import PurchaseCosts    from "./components/PurchaseCosts.jsx";
+import SuburbProfiles  from "./components/SuburbProfiles.jsx";
 
 const ADMIN_EMAIL = "cmshiyas007@gmail.com";
 
@@ -44,7 +45,8 @@ export default function App() {
   if (access === "checking") return <Spinner />;
   if (access === "pending")  return <PendingScreen user={user} onSignOut={signOutUser} />;
 
-  if (page === "purchase-costs") return <PurchaseCosts onBack={() => setPage("dashboard")} />;
+  if (page === "purchase-costs")  return <PurchaseCosts   onBack={() => setPage("dashboard")} />;
+  if (page === "suburb-profiles")  return <SuburbProfiles  onBack={() => setPage("dashboard")} />;
 
   return (
     <PropertyTracker
