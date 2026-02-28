@@ -2,28 +2,36 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ── Access control ────────────────────────────────────────────────────────
+    match /approved_users/{email} {
+      allow read:  if request.auth != null && request.auth.token.email == email;
+      allow write: if request.auth != null && request.auth.token.email == "cmshiyas007@gmail.com";
+    }
     match /access_requests/{email} {
       allow read, write: if request.auth != null &&
-        (request.auth.token.email == "cmshiyas007@gmail.com" ||
-         request.auth.token.email == email);
+        (request.auth.token.email == email ||
+         request.auth.token.email == "cmshiyas007@gmail.com");
     }
 
-    match /approved_users/{email} {
-      allow read: if request.auth != null &&
-        (request.auth.token.email == "cmshiyas007@gmail.com" ||
-         request.auth.token.email == email);
-      allow write: if request.auth != null &&
-        request.auth.token.email == "cmshiyas007@gmail.com";
+    // ── Shared data — all authenticated users read, admin-only write ──────────
+    match /shared/{document=**} {
+      allow read:  if request.auth != null;
+      allow write: if request.auth != null && request.auth.token.email == "cmshiyas007@gmail.com";
     }
 
-    // Tracker data: any signed-in user can read/write
+    // ── Legacy paths — read by all, write by admin (for migration) ────────────
     match /tracker/{document} {
-      allow read, write: if request.auth != null;
+      allow read:  if request.auth != null;
+      allow write: if request.auth != null && request.auth.token.email == "cmshiyas007@gmail.com";
+    }
+    match /settings/{document} {
+      allow read:  if request.auth != null;
+      allow write: if request.auth != null && request.auth.token.email == "cmshiyas007@gmail.com";
     }
 
-    // Settings (purchase costs etc): any signed-in user can read, write
-    match /settings/{document} {
-      allow read, write: if request.auth != null;
+    // ── Per-user data — only the owner can read/write ─────────────────────────
+    match /users/{uid}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
     }
   }
 }

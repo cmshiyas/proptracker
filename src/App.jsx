@@ -5,7 +5,8 @@ import AuthScreen    from "./components/AuthScreen.jsx";
 import PendingScreen from "./components/PendingScreen.jsx";
 import PropertyTracker from "./components/PropertyTracker.jsx";
 import PurchaseCosts    from "./components/PurchaseCosts.jsx";
-import SuburbProfiles  from "./components/SuburbProfiles.jsx";
+import SuburbProfiles   from "./components/SuburbProfiles.jsx";
+import StreetProfiles   from "./components/StreetProfiles.jsx";
 
 const ADMIN_EMAIL = "cmshiyas007@gmail.com";
 
@@ -46,7 +47,8 @@ export default function App() {
   if (access === "pending")  return <PendingScreen user={user} onSignOut={signOutUser} />;
 
   if (page === "purchase-costs")  return <PurchaseCosts   onBack={() => setPage("dashboard")} />;
-  if (page === "suburb-profiles")  return <SuburbProfiles  onBack={() => setPage("dashboard")} />;
+  if (page === "suburb-profiles")  return <SuburbProfiles  onBack={() => setPage("dashboard")} isAdmin={user.email === ADMIN_EMAIL} />;
+  if (page === "street-profiles")   return <StreetProfiles   onBack={() => setPage("dashboard")} isAdmin={user.email === ADMIN_EMAIL} />;
 
   return (
     <PropertyTracker

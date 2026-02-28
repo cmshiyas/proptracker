@@ -42,7 +42,7 @@ function SuburbPopup({ suburb, anchorRef, onMouseEnter, onMouseLeave }) {
 }
 
 // ── Individual suburb card ─────────────────────────────────────────────────────
-function SuburbCard({ suburb, onDelete }) {
+function SuburbCard({ suburb, onDelete, isAdmin }) {
   const [show,    setShow]   = useState(false);
   const cardRef   = useRef();
   const hideTimer = useRef(null);
@@ -153,7 +153,7 @@ function AddSuburbModal({ onAdd, onClose, existingSuburbs }) {
 }
 
 // ── Main Suburb Profiles Page ──────────────────────────────────────────────────
-export default function SuburbProfiles({ onBack }) {
+export default function SuburbProfiles({ onBack, isAdmin }) {
   const [profiles, setProfiles] = useState([]);
   const [loading,  setLoading]  = useState(true);
   const [saving,   setSaving]   = useState(false);
@@ -227,10 +227,12 @@ export default function SuburbProfiles({ onBack }) {
               <input value={search} onChange={e => setSearch(e.target.value)}
                 placeholder="Search suburbs..."
                 style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 14px", fontSize: 13, color: "#1e293b", outline: "none", width: 200 }} />
-              <button onClick={() => setShowAdd(true)}
-                style={{ background: "#0ea5e9", border: "none", borderRadius: 8, padding: "10px 20px", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, boxShadow: "0 2px 8px rgba(14,165,233,0.3)", whiteSpace: "nowrap" }}>
-                + Add Suburb
-              </button>
+              {isAdmin && (
+                <button onClick={() => setShowAdd(true)}
+                  style={{ background: "#0ea5e9", border: "none", borderRadius: 8, padding: "10px 20px", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, boxShadow: "0 2px 8px rgba(14,165,233,0.3)", whiteSpace: "nowrap" }}>
+                  + Add Suburb
+                </button>
+              )}
             </div>
           </div>
 
@@ -245,10 +247,12 @@ export default function SuburbProfiles({ onBack }) {
               <div style={{ fontSize: 48, marginBottom: 16 }}>🏘</div>
               <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, color: "#0f172a", marginBottom: 8 }}>No suburb profiles yet</div>
               <div style={{ color: "#94a3b8", fontSize: 14, marginBottom: 24 }}>Add your first suburb to start building your research library.</div>
-              <button onClick={() => setShowAdd(true)}
-                style={{ background: "#0ea5e9", border: "none", borderRadius: 8, padding: "11px 28px", color: "#fff", cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
-                + Add First Suburb
-              </button>
+              {isAdmin && (
+                <button onClick={() => setShowAdd(true)}
+                  style={{ background: "#0ea5e9", border: "none", borderRadius: 8, padding: "11px 28px", color: "#fff", cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
+                  + Add First Suburb
+                </button>
+              )}
             </div>
           )}
 
@@ -274,7 +278,7 @@ export default function SuburbProfiles({ onBack }) {
               {/* Suburb cards grid */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 10 }}>
                 {suburbs.map(s => (
-                  <SuburbCard key={s.id} suburb={s} onDelete={() => handleDelete(s.id)} />
+                  <SuburbCard key={s.id} suburb={s} onDelete={() => handleDelete(s.id)} isAdmin={isAdmin} />
                 ))}
               </div>
             </div>

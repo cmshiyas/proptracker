@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from "firebase/auth";
-import { getFirestore, doc, getDoc, setDoc, collection, getDocs, deleteDoc, onSnapshot, query, where } from "firebase/firestore";
+import { getFirestore, doc, getDoc, setDoc, collection, getDocs, deleteDoc, onSnapshot } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey:            "AIzaSyDbmG1zzpdFP3cmmCwy4-sUTQRPpFd9BIw",
@@ -15,9 +15,12 @@ const app      = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db   = getFirestore(app);
 
+const ADMIN_EMAIL = "cmshiyas007@gmail.com";
+
 export const signInWithGoogle = () => signInWithPopup(auth, new GoogleAuthProvider());
 export const signOutUser      = () => signOut(auth);
 
+// ── Access control (shared, admin-managed) ─────────────────────────────────────
 export async function getApprovedUser(email) {
   const snap = await getDoc(doc(db, "approved_users", email));
   return snap.exists() ? snap.data() : null;
@@ -34,7 +37,6 @@ export async function denyRequest(email) {
 export async function submitAccessRequest(user) {
   const ref  = doc(db, "access_requests", user.email);
   const snap = await getDoc(ref);
-  // Always write a fresh pending request unless already approved
   if (!snap.exists() || snap.data().status !== "approved") {
     await setDoc(ref, { email: user.email, name: user.displayName || "", photo: user.photoURL || "", status: "pending", requestedAt: Date.now() });
   }
@@ -43,7 +45,6 @@ export async function getPendingRequests() {
   const snap = await getDocs(collection(db, "access_requests"));
   return snap.docs.map(d => d.data()).filter(r => r.status === "pending");
 }
-// Real-time listener for pending request count — calls callback whenever count changes
 export function onPendingCountChange(callback) {
   return onSnapshot(collection(db, "access_requests"), (snap) => {
     const count = snap.docs.filter(d => d.data().status === "pending").length;
@@ -55,34 +56,73 @@ export async function getApprovedUsers() {
   return snap.docs.map(d => d.data());
 }
 
-// ── Tracker data ───────────────────────────────────────────────────────────────
+// ── Per-user helpers ───────────────────────────────────────────────────────────
+const userDoc    = (uid, ...path) => doc(db, "users", uid, ...path);
+const sharedDoc  = (...path)       => doc(db, "shared", ...path);
+
+// ── Tracker data (shared, all users read, admin-only write) ───────────────────
+// Falls back to legacy paths (tracker/rows, tracker/cols) and auto-migrates
 export async function loadTrackerData() {
   const [rowsSnap, colsSnap] = await Promise.all([
-    getDoc(doc(db, "tracker", "rows")),
-    getDoc(doc(db, "tracker", "cols")),
+    getDoc(sharedDoc("tracker_rows")),
+    getDoc(sharedDoc("tracker_cols")),
   ]);
-  return {
-    rows: rowsSnap.exists() ? rowsSnap.data().value : null,
-    cols: colsSnap.exists() ? colsSnap.data().value : null,
-  };
-}
-export async function saveTrackerRows(rows) { await setDoc(doc(db, "tracker", "rows"), { value: rows }); }
-export async function saveTrackerCols(cols) { await setDoc(doc(db, "tracker", "cols"), { value: cols }); }
+  let rows = rowsSnap.exists() ? rowsSnap.data().value : null;
+  let cols = colsSnap.exists() ? colsSnap.data().value : null;
 
-// ── Purchase costs ─────────────────────────────────────────────────────────────
+  // If shared/ is empty, try the original legacy path tracker/rows & tracker/cols
+  if (!rows || !cols) {
+    const [legacyRows, legacyCols] = await Promise.all([
+      getDoc(doc(db, "tracker", "rows")),
+      getDoc(doc(db, "tracker", "cols")),
+    ]);
+    if (!rows && legacyRows.exists()) {
+      rows = legacyRows.data().value;
+      // Auto-migrate to new path
+      await setDoc(sharedDoc("tracker_rows"), { value: rows });
+    }
+    if (!cols && legacyCols.exists()) {
+      cols = legacyCols.data().value;
+      await setDoc(sharedDoc("tracker_cols"), { value: cols });
+    }
+  }
+  return { rows, cols };
+}
+export async function saveTrackerRows(rows) { await setDoc(sharedDoc("tracker_rows"), { value: rows }); }
+export async function saveTrackerCols(cols) { await setDoc(sharedDoc("tracker_cols"), { value: cols }); }
+
+// ── Purchase costs (shared, all users read, admin-only write) ──────────────────
 export async function loadPurchaseCosts() {
-  const snap = await getDoc(doc(db, "settings", "purchase_costs"));
-  return snap.exists() ? snap.data() : null;
+  const snap = await getDoc(sharedDoc("purchase_costs"));
+  if (snap.exists()) return snap.data();
+  // Fallback: try legacy path settings/purchase_costs
+  const legacy = await getDoc(doc(db, "settings", "purchase_costs"));
+  if (legacy.exists()) {
+    await setDoc(sharedDoc("purchase_costs"), legacy.data()); // auto-migrate
+    return legacy.data();
+  }
+  return null;
 }
 export async function savePurchaseCosts(data) {
-  await setDoc(doc(db, "settings", "purchase_costs"), data);
+  await setDoc(sharedDoc("purchase_costs"), data);
 }
 
-// ── Suburb Profiles ────────────────────────────────────────────────────────────
+// ── Shared reference data (all users read, admin-only write) ──────────────────
+
+// ── Suburb Profiles (shared, admin-only write) ─────────────────────────────────
 export async function loadSuburbProfiles() {
-  const snap = await getDoc(doc(db, "settings", "suburb_profiles"));
+  const snap = await getDoc(sharedDoc("suburb_profiles"));
   return snap.exists() ? snap.data().profiles || [] : [];
 }
 export async function saveSuburbProfiles(profiles) {
-  await setDoc(doc(db, "settings", "suburb_profiles"), { profiles });
+  await setDoc(sharedDoc("suburb_profiles"), { profiles });
+}
+
+// ── Street PH Profiles (shared, admin-only write) ──────────────────────────────
+export async function loadStreetProfiles() {
+  const snap = await getDoc(sharedDoc("street_profiles"));
+  return snap.exists() ? snap.data().entries || [] : [];
+}
+export async function saveStreetProfiles(entries) {
+  await setDoc(sharedDoc("street_profiles"), { entries });
 }

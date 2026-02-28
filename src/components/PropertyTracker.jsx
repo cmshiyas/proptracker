@@ -1,15 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import { loadTrackerData, saveTrackerRows, saveTrackerCols, loadPurchaseCosts, onPendingCountChange } from "../firebase.js";
+import { loadTrackerData, saveTrackerRows, saveTrackerCols, loadPurchaseCosts, onPendingCountChange, loadStreetProfiles } from "../firebase.js";
 import { calcStampDuty, formatCurrency } from "../stampDuty.js";
 import AdminPanel from "./AdminPanel.jsx";
 
 const MANDATORY_COLUMNS = [
   { id:"property",    label:"Property",    type:"link",     width:220, locked:true },
+  { id:"address",     label:"Address",     type:"text",     width:200, locked:true },
   { id:"price",       label:"Price",       type:"currency", width:150, locked:true },
   { id:"config",      label:"Config",      type:"text",     width:120, locked:true },
   { id:"land",        label:"Land",        type:"text",     width:110, locked:true },
-  { id:"ph_rating",   label:"PH Rating",   type:"rating",   width:120, locked:true },
+  { id:"ph_rating",   label:"PH Rating",   type:"ph_tag",   width:130, locked:true },
+  { id:"calc_ph",     label:"Calculated PH", type:"calc_ph",  width:160, locked:true },
   { id:"suburb",      label:"Suburb",      type:"text",     width:140, locked:true },
   { id:"state",       label:"State",       type:"select",   width:100, locked:true, options:["NSW","VIC","QLD","WA","SA","TAS","ACT","NT"] },
   { id:"offer_price",     label:"Offer Price",      type:"currency", width:140, locked:true },
@@ -21,8 +23,8 @@ const MANDATORY_COLUMNS = [
 ];
 
 const INITIAL_ROWS = [
-  { id:1, property:"", price:"", config:"", land:"", ph_rating:"", suburb:"", state:"", type:"", offer_price:"", rental_appraisal:"", cost_of_purchase:"", yield:"", comments:"", agent_notes:"" },
-  { id:2, property:"", price:"", config:"", land:"", ph_rating:"", suburb:"", state:"", type:"", offer_price:"", rental_appraisal:"", cost_of_purchase:"", yield:"", comments:"", agent_notes:"" },
+  { id:1, address:"", property:"", price:"", config:"", land:"", ph_rating:"", calc_ph:"", suburb:"", state:"", type:"", offer_price:"", rental_appraisal:"", cost_of_purchase:"", yield:"", comments:"", agent_notes:"" },
+  { id:2, address:"", property:"", price:"", config:"", land:"", ph_rating:"", calc_ph:"", suburb:"", state:"", type:"", offer_price:"", rental_appraisal:"", cost_of_purchase:"", yield:"", comments:"", agent_notes:"" },
 ];
 
 // ── AI Property Extractor (via Firebase Cloud Function proxy) ─────────────────
@@ -84,11 +86,12 @@ function QuickAddModal({ onAdd, onClose }) {
     if (!preview) return;
     onAdd({
       property:  url.trim() || "",
-      price:     preview.price     || "",
-      config:    preview.config    || "",
-      land:      preview.land      || "",
-      suburb:    preview.suburb    || "",
-      state:     preview.state     || "",
+      address:   preview.address  || "",
+      price:     preview.price    || "",
+      config:    preview.config   || "",
+      land:      preview.land     || "",
+      suburb:    preview.suburb   || "",
+      state:     preview.state    || "",
     });
     onClose();
   };
@@ -254,6 +257,25 @@ function NotePopup({ entries, anchorRef }) {
   );
 }
 
+
+// ── PH Colour Tag constants ────────────────────────────────────────────────────
+const PH_OPTIONS = ["Black", "Pink", "Amber", "Green"];
+const PH_COLOUR_STYLES = {
+  Black: { bg:"#1e293b", text:"#fff",    border:"#0f172a", cell:"#1e293b" },
+  Pink:  { bg:"#fce7f3", text:"#9d174d", border:"#f9a8d4", cell:"#fdf2f8" },
+  Amber: { bg:"#fef3c7", text:"#92400e", border:"#fbbf24", cell:"#fffbeb" },
+  Green: { bg:"#dcfce7", text:"#14532d", border:"#4ade80", cell:"#f0fdf4" },
+};
+function PhTag({ colour }) {
+  const s = PH_COLOUR_STYLES[colour] || { bg:"#f1f5f9", text:"#64748b", border:"#e2e8f0" };
+  return (
+    <span style={{ background:s.bg, color:s.text, border:`1px solid ${s.border}`,
+      borderRadius:20, padding:"2px 8px", fontSize:11, fontWeight:700, whiteSpace:"nowrap" }}>
+      {colour}
+    </span>
+  );
+}
+
 // ── Cell ───────────────────────────────────────────────────────────────────────
 function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse, analysing }) {
   const [local,    setLocal]    = useState(value||"");
@@ -297,6 +319,52 @@ function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse
     </div>
   );
   if (col.type==="rating") return <div style={{ ...cs, cursor:"default" }}><StarRating value={value} onChange={onChange}/></div>;
+  if (col.type==="ph_tag") {
+    const s = value ? PH_COLOUR_STYLES[value] : null;
+    const cellBg = s ? s.cell : "transparent";
+    return (
+      <div style={{ ...cs, background: cellBg, padding:"0 8px", transition:"background 0.2s" }}>
+        <select
+          value={value || ""}
+          onChange={e => onChange(e.target.value)}
+          style={{
+            width:"100%", border:"none", outline:"none", fontFamily:"inherit",
+            fontSize:12, fontWeight:700, cursor:"pointer",
+            background:"transparent",
+            color: s ? s.text : "#94a3b8",
+          }}>
+          <option value="">— Select —</option>
+          {PH_OPTIONS.map(opt => (
+            <option key={opt} value={opt}>{opt}</option>
+          ))}
+        </select>
+      </div>
+    );
+  }
+  if (col.type==="calc_ph") {
+    // Live lookup: match row address against street profiles
+    const addr = (col._rowAddress || "").toLowerCase();
+    const profiles = col._streetProfiles || [];
+    const match = addr
+      ? profiles.find(sp => {
+          const street = (sp.street || "").toLowerCase();
+          // Match on street name portion (before comma) within address
+          const streetName = street.split(",")[0].trim();
+          return streetName && addr.includes(streetName);
+        })
+      : null;
+    const colours = match ? match.ph_profile : [];
+    const colourList = Array.isArray(colours) ? colours : (colours ? [colours] : []);
+    return (
+      <div style={{ ...cs, cursor:"default", background:"#f8fafc", gap:4, flexWrap:"wrap" }}>
+        {colourList.length > 0
+          ? colourList.map(c => <PhTag key={c} colour={c} />)
+          : <span style={{ fontSize:11, color:"#cbd5e1", fontStyle:"italic" }}>
+              {addr ? "No match" : "—"}
+            </span>}
+      </div>
+    );
+  }
   if (col.type==="select") return (
     <div style={cs}>
       <select value={value||""} onChange={e=>onChange(e.target.value)}
@@ -502,6 +570,8 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
   const [saving,       setSaving]       = useState(false);
   const [analysingRows,  setAnalysingRows]  = useState(new Set());
   const [pendingCount,   setPendingCount]   = useState(0);
+  const [saveError,      setSaveError]      = useState("");
+  const [streetProfiles, setStreetProfiles] = useState([]);
   const [purchaseCosts,  setPurchaseCosts]  = useState(null);
   const purchaseCostsRef = useRef(null);
 
@@ -510,17 +580,39 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
 
   useEffect(()=>{
     loadTrackerData().then(({ rows:r, cols:c })=>{
-      if(r){ setRows(r); setNextId(Math.max(...r.map(x=>x.id),0)+1); }
-      if(c) setColumns(c);
+      if(r){
+        // Migrate old rows: add address if missing, normalise ph_rating array→string
+        const migrated = r.map(row => ({
+          address: "",
+          ...row,
+          ph_rating: Array.isArray(row.ph_rating) ? (row.ph_rating[0] || "") : (row.ph_rating || ""),
+          calc_ph: row.calc_ph || "",
+        }));
+        setRows(migrated);
+        setNextId(Math.max(...migrated.map(x=>x.id),0)+1);
+      }
+      // Always use latest MANDATORY_COLUMNS for locked cols + preserve custom cols
+      const customCols = c ? c.filter(sc => !sc.locked) : [];
+      setColumns([...MANDATORY_COLUMNS, ...customCols]);
     });
     loadPurchaseCosts().then(d => { if(d) { setPurchaseCosts(d); purchaseCostsRef.current = d; } });
+    loadStreetProfiles().then(d => setStreetProfiles(d));
     // Real-time listener for pending access requests
     const unsubPending = onPendingCountChange(count => setPendingCount(count));
     return () => unsubPending();
   },[]);
 
-  const saveRows     = useCallback(async (nr)=>{ setRows(nr); setSaving(true); await saveTrackerRows(nr); setSaving(false); },[]);
-  const saveCols     = useCallback(async (nc)=>{ setColumns(nc); await saveTrackerCols(nc); },[]);
+  const saveRows     = useCallback(async (nr)=>{ 
+    setRows(nr); setSaving(true); 
+    try { await saveTrackerRows(nr); setSaveError(""); } 
+    catch(e) { console.error("saveRows error:",e); setSaveError("Save failed: " + (e.code || e.message)); }
+    setSaving(false); 
+  },[]);
+  const saveCols     = useCallback(async (nc)=>{ 
+    setColumns(nc); 
+    try { await saveTrackerCols(nc); setSaveError(""); } 
+    catch(e) { console.error("saveCols error:",e); setSaveError("Save failed: " + (e.code || e.message)); }
+  },[]);
   const updateCell = (rowId, colId, v) => {
     setRows(prev => {
       const updated = prev.map(r => {
@@ -534,7 +626,7 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
       });
       // Save to Firestore in background
       setSaving(true);
-      saveTrackerRows(updated).then(() => setSaving(false));
+      saveTrackerRows(updated).then(() => { setSaving(false); setSaveError(""); }).catch(e => { setSaving(false); setSaveError("Save failed: " + (e.code || e.message)); console.error("updateCell save error:",e); });
       return updated;
     });
   };
@@ -568,17 +660,23 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
   };
 
   const quickAddProperty = (parsed) => {
+    // Auto-match PH rating from street profiles by checking if address contains a known street
+    const addr = (parsed.address || "").toLowerCase();
+    const matchedStreet = streetProfiles.find(sp =>
+      addr && sp.street && addr.includes(sp.street.toLowerCase().split(",")[0].trim())
+    );
     const row = {
       id: nextId,
       ...Object.fromEntries(columns.map(c=>[c.id,""])),
-      property:  parsed.property  || "",
-      price:     parsed.price     || "",
-      config:    parsed.config    || "",
-      land:      parsed.land      || "",
-      suburb:    parsed.suburb    || "",
-      state:     parsed.state     || "",
-      ph_rating: "",
-      comments:  "",
+      property:    parsed.property  || "",
+      address:     parsed.address   || "",
+      price:       parsed.price     || "",
+      config:      parsed.config    || "",
+      land:        parsed.land      || "",
+      suburb:      parsed.suburb    || "",
+      state:       parsed.state     || "",
+      ph_rating:   matchedStreet ? (Array.isArray(matchedStreet.ph_profile) ? matchedStreet.ph_profile[0] || "" : matchedStreet.ph_profile) : "",
+      comments:    "",
       agent_notes: "",
     };
     setNextId(n=>n+1);
@@ -606,6 +704,7 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
             <div style={{ width:32, height:32, borderRadius:8, background:"linear-gradient(135deg,#0ea5e9,#0369a1)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:16 }}>&#127968;</div>
             <span style={{ fontFamily:"'Playfair Display', serif", fontWeight:700, fontSize:18, color:"#0f172a" }}>PropTracker</span>
             {saving && <span style={{ color:"#94a3b8", fontSize:11, marginLeft:4, background:"#f1f5f9", borderRadius:20, padding:"2px 10px" }}>Saving...</span>}
+            {saveError && <span style={{ color:"#dc2626", fontSize:11, marginLeft:4, background:"#fef2f2", border:"1px solid #fecaca", borderRadius:20, padding:"2px 10px" }}>⚠ {saveError}</span>}
             <button onClick={()=>onNavigate && onNavigate("purchase-costs")}
               style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:8, padding:"6px 14px", color:"#16a34a", cursor:"pointer", fontSize:13, fontWeight:500, marginLeft:8 }}>
               &#128200; Purchase Costs
@@ -613,6 +712,10 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
             <button onClick={()=>onNavigate && onNavigate("suburb-profiles")}
               style={{ background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:8, padding:"6px 14px", color:"#0369a1", cursor:"pointer", fontSize:13, fontWeight:500 }}>
               &#127968; Suburb Profiles
+            </button>
+            <button onClick={()=>onNavigate && onNavigate("street-profiles")}
+              style={{ background:"#fffbeb", border:"1px solid #fde68a", borderRadius:8, padding:"6px 14px", color:"#b45309", cursor:"pointer", fontSize:13, fontWeight:500 }}>
+              &#127968; Street PH Profiles
             </button>
           </div>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
@@ -674,7 +777,7 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
             {[
               { label:"Total Properties", value:rows.length, color:"#0ea5e9" },
               { label:"Analysed",   value:rows.filter(r=>r.ph_rating).length, color:"#f59e0b" },
-              { label:"Avg PH Rating", value:(()=>{ const r=rows.filter(r=>r.ph_rating); return r.length?(r.reduce((s,x)=>s+parseFloat(x.ph_rating||0),0)/r.length).toFixed(1)+"★":"—"; })(), color:"#10b981" },
+              { label:"PH Rated", value:rows.filter(r=>r.ph_rating).length, color:"#10b981" },
             ].map(s=>(
               <div key={s.label} style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:10, padding:"12px 20px", display:"flex", alignItems:"center", gap:12 }}>
                 <div style={{ width:4, height:36, borderRadius:2, background:s.color }}/>
@@ -721,15 +824,21 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
                     checked={selectedRows.has(row.id)}
                     onChange={e=>{ const s=new Set(selectedRows); e.target.checked?s.add(row.id):s.delete(row.id); setSelectedRows(s); }}/>
                 </div>
-                {columns.map(col=>(
-                  <Cell key={col.id} col={col} value={row[col.id]}
-                    onChange={v=>updateCell(row.id,col.id,v)}
-                    editing={editing?.rowId===row.id&&editing?.colId===col.id}
-                    onStartEdit={()=>setEditing({rowId:row.id,colId:col.id})}
-                    onEndEdit={()=>setEditing(null)}
-                    onAnalyse={null}
-                    analysing={false}/>
-                ))}
+                {columns.map(col=>{
+                  // For calc_ph, inject address + street profiles for live lookup
+                  const enrichedCol = col.type==="calc_ph"
+                    ? { ...col, _rowAddress: row.address||"", _streetProfiles: streetProfiles }
+                    : col;
+                  return (
+                    <Cell key={col.id} col={enrichedCol} value={row[col.id]}
+                      onChange={v=>updateCell(row.id,col.id,v)}
+                      editing={editing?.rowId===row.id&&editing?.colId===col.id}
+                      onStartEdit={()=>setEditing({rowId:row.id,colId:col.id})}
+                      onEndEdit={()=>setEditing(null)}
+                      onAnalyse={null}
+                      analysing={false}/>
+                  );
+                })}
               </div>
             ))}
 
