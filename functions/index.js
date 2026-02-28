@@ -56,7 +56,7 @@ ${input}
 - suburb
 - state (one of: NSW, VIC, QLD, WA, SA, TAS, ACT, NT)
 - price (e.g. "Offers Over $649,000" or "$850,000" or "Auction")
-- config (formatted as "3 bed / 2 bath / 2 car")
+- config (formatted as "3,2,2" — just the numbers for beds,baths,cars separated by commas)
 - land (e.g. "643m²")
 - building (e.g. "180m²", empty string if not available)
 - type (e.g. "House", "Unit", "Townhouse")

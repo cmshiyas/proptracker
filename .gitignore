@@ -34,3 +34,7 @@ npm-debug.log*
 
 # Vite
 vite.config.js.timestamp-*
+
+# Archives
+*.zip
+*.tar.gz

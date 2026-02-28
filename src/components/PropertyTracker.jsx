@@ -8,7 +8,6 @@ const MANDATORY_COLUMNS = [
   { id:"price",       label:"Price",       type:"currency", width:150, locked:true },
   { id:"config",      label:"Config",      type:"text",     width:120, locked:true },
   { id:"land",        label:"Land",        type:"text",     width:110, locked:true },
-  { id:"building",    label:"Building",    type:"text",     width:110, locked:true },
   { id:"ph_rating",   label:"PH Rating",   type:"rating",   width:120, locked:true },
   { id:"suburb",      label:"Suburb",      type:"text",     width:140, locked:true },
   { id:"state",       label:"State",       type:"select",   width:100, locked:true, options:["NSW","VIC","QLD","WA","SA","TAS","ACT","NT"] },
@@ -21,8 +20,8 @@ const MANDATORY_COLUMNS = [
 ];
 
 const INITIAL_ROWS = [
-  { id:1, property:"", price:"", config:"", land:"", ph_rating:"", suburb:"", state:"", building:"", type:"", offer_price:"", rental_appraisal:"", cost_of_purchase:"", yield:"", comments:"", agent_notes:"" },
-  { id:2, property:"", price:"", config:"", land:"", ph_rating:"", suburb:"", state:"", building:"", type:"", offer_price:"", rental_appraisal:"", cost_of_purchase:"", yield:"", comments:"", agent_notes:"" },
+  { id:1, property:"", price:"", config:"", land:"", ph_rating:"", suburb:"", state:"", type:"", offer_price:"", rental_appraisal:"", cost_of_purchase:"", yield:"", comments:"", agent_notes:"" },
+  { id:2, property:"", price:"", config:"", land:"", ph_rating:"", suburb:"", state:"", type:"", offer_price:"", rental_appraisal:"", cost_of_purchase:"", yield:"", comments:"", agent_notes:"" },
 ];
 
 // ── AI Property Extractor (via Firebase Cloud Function proxy) ─────────────────
@@ -87,7 +86,6 @@ function QuickAddModal({ onAdd, onClose }) {
       price:     preview.price     || "",
       config:    preview.config    || "",
       land:      preview.land      || "",
-      building:  preview.building  || "",
       suburb:    preview.suburb    || "",
       state:     preview.state     || "",
     });
@@ -154,7 +152,6 @@ function QuickAddModal({ onAdd, onClose }) {
                 ["State",    "state"],
                 ["Config",   "config"],
                 ["Land",     "land"],
-                ["Building", "building"],
                 ["Price",    "price"],
                 ["Type",     "type"],
               ].map(([label, key])=>(
@@ -222,7 +219,14 @@ function StarRating({ value, onChange }) {
 function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse, analysing }) {
   const [local, setLocal] = useState(value||"");
   const ref = useRef();
-  useEffect(()=>{ setLocal(value||""); },[value]);
+  useEffect(()=>{
+    // For timestamped cols: clear local when starting a fresh edit
+    if (col.id==="comments" || col.id==="agent_notes") {
+      if (!editing) setLocal("");
+    } else {
+      setLocal(value||"");
+    }
+  },[value, editing]);
   useEffect(()=>{ if(editing&&ref.current) ref.current.focus(); },[editing]);
 
   const commit = ()=>{ onChange(local); onEndEdit(); };
@@ -271,20 +275,69 @@ function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse
           : <span style={{ color:"#cbd5e1", fontSize:13 }}>Paste URL</span>}
     </div>
   );
+  const isTimestamped = col.id === "comments" || col.id === "agent_notes";
+
+  // Parse timestamped entries: "DD/MM/YY HH:MM: text\n---\nDD/MM/YY HH:MM: text"
+  const parseEntries = (v) => {
+    if (!v) return [];
+    return v.split("\n---\n").map(e => {
+      const m = e.match(/^(\d{2}\/\d{2}\/\d{2} \d{2}:\d{2}): (.*)$/s);
+      return m ? { ts: m[1], text: m[2] } : { ts: "", text: e };
+    }).filter(e => e.text.trim());
+  };
+
+  const commitTimestamped = () => {
+    // Preserve text exactly as typed (including newlines), only trim trailing whitespace
+    const text = local.replace(/\s+$/, "");
+    if (text && text !== (parseEntries(value)[0]?.text || "")) {
+      const now = new Date();
+      const ts = `${String(now.getDate()).padStart(2,"0")}/${String(now.getMonth()+1).padStart(2,"0")}/${String(now.getFullYear()).slice(-2)} ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+      const newEntry = ts + ":\n" + text;
+      const prev = value || "";
+      onChange(prev ? newEntry + "\n---\n" + prev : newEntry);
+    }
+    onEndEdit();
+  };
+
+  // Parse entries — supports both new (ts:\ntext) and legacy (ts: text) formats
+  const parseEntriesV2 = (v) => {
+    if (!v) return [];
+    return v.split("\n---\n").map(e => {
+      const m = e.match(/^(\d{2}\/\d{2}\/\d{2} \d{2}:\d{2}):\n([\s\S]*)$/);
+      if (m) return { ts: m[1], text: m[2] };
+      const m2 = e.match(/^(\d{2}\/\d{2}\/\d{2} \d{2}:\d{2}): ([\s\S]*)$/);
+      if (m2) return { ts: m2[1], text: m2[2] };
+      return { ts: "", text: e };
+    }).filter(e => e.text.trim());
+  };
+
   if (col.type==="textarea") return (
-    <div style={{ ...cs, alignItems:"flex-start", paddingTop:8, position:"relative", flexDirection:"column", gap:4 }} onClick={onStartEdit}>
-      {editing
-        ? <textarea ref={ref} value={local} onChange={e=>setLocal(e.target.value)} onBlur={commit}
-            onKeyDown={e=>{ if(e.key==="Escape"){setLocal(value||"");onEndEdit();} }}
-            style={{ ...inputStyle, height:50, resize:"none", lineHeight:1.5 }}/>
-        : <span style={{ fontSize:12, color:value?"#475569":"#cbd5e1", overflow:"hidden", display:"-webkit-box", WebkitLineClamp:3, WebkitBoxOrient:"vertical", flex:1, width:"100%" }}>
-            {value||(onAnalyse?"Click ✨ to generate":"Add note")}
-          </span>}
+    <div style={{ ...cs, alignItems:"flex-start", paddingTop:8, position:"relative", flexDirection:"column", gap:4 }}
+      onClick={onStartEdit}>
+      {editing ? (
+        <textarea ref={ref} value={local} onChange={e=>setLocal(e.target.value)}
+          onBlur={isTimestamped ? commitTimestamped : commit}
+          onKeyDown={e=>{ if(e.key==="Escape"){setLocal("");onEndEdit();} }}
+          placeholder={isTimestamped ? "Type note, click away to save with timestamp..." : ""}
+          style={{ ...inputStyle, height:54, resize:"none", lineHeight:1.5, fontSize:12 }}/>
+      ) : isTimestamped ? (
+        <div style={{ width:"100%", overflow:"hidden" }}>
+          {parseEntriesV2(value).length > 0 ? parseEntriesV2(value).slice(0,1).map((e,i) => (
+            <div key={i}>
+              <div style={{ fontSize:9, color:"#94a3b8", fontWeight:600, marginBottom:1 }}>{e.ts}</div>
+              <div style={{ fontSize:12, color:"#475569", overflow:"hidden", whiteSpace:"pre-line",
+                display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical" }}>{e.text}</div>
+              {parseEntriesV2(value).length > 1 && <div style={{ fontSize:10, color:"#94a3b8", marginTop:2 }}>+{parseEntriesV2(value).length-1} more entries</div>}
+            </div>
+          )) : <span style={{ fontSize:12, color:"#cbd5e1" }}>Add note</span>}
+        </div>
+      ) : (
+        <span style={{ fontSize:12, color:value?"#475569":"#cbd5e1", overflow:"hidden", display:"-webkit-box", WebkitLineClamp:3, WebkitBoxOrient:"vertical", flex:1, width:"100%" }}>
+          {value||(onAnalyse?"Click ✨ to generate":"Add note")}
+        </span>
+      )}
       {onAnalyse && !editing && (
-        <button
-          onClick={e=>{ e.stopPropagation(); onAnalyse(); }}
-          disabled={analysing}
-          title="Generate AI analysis"
+        <button onClick={e=>{ e.stopPropagation(); onAnalyse(); }} disabled={analysing}
           style={{ position:"absolute", top:6, right:6, background:analysing?"#e2e8f0":"#f0f9ff", border:"1px solid #bae6fd", borderRadius:6, padding:"2px 7px", fontSize:11, color:analysing?"#94a3b8":"#0ea5e9", cursor:analysing?"not-allowed":"pointer", fontWeight:600, whiteSpace:"nowrap", zIndex:1 }}>
           {analysing ? "..." : "✨ AI"}
         </button>
@@ -293,15 +346,18 @@ function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse
   );
   if (col.type==="readonly") return (
     <div style={{ ...cs, cursor:"default", background:"#f8fafc" }}>
-      <span style={{ fontSize:13, fontWeight:700, color:value?"#0369a1":"#cbd5e1" }}>
-        {value || "—"}
+      <span style={{ fontSize:13, fontWeight:700, color:value?"#0369a1":"#94a3b8", fontStyle:value?"normal":"italic" }}>
+        {value || (col.id==="cost_of_purchase" ? "Enter offer price" : col.id==="yield" ? "Enter offer + rent" : "—")}
       </span>
     </div>
   );
   if (col.type==="currency") return (
     <div style={cs} onClick={onStartEdit}>
       {editing
-        ? <input ref={ref} value={local} onChange={e=>setLocal(e.target.value)} onBlur={commit} onKeyDown={kd} placeholder="$0" style={{ ...inputStyle, color:"#16a34a", fontWeight:600 }}/>
+        ? <input ref={ref} value={local}
+            onChange={e => { setLocal(e.target.value); onChange(e.target.value); }}
+            onBlur={commit} onKeyDown={kd} placeholder="$0"
+            style={{ ...inputStyle, color:"#16a34a", fontWeight:600 }}/>
         : <span style={{ color:value?"#16a34a":"#cbd5e1", fontSize:13, fontWeight:600 }}>
             {value ? (isNaN(value.replace(/[,$]/g,"")) ? value : `$${Number(value.replace(/[,$]/g,"")).toLocaleString()}`) : "—"}
           </span>}
@@ -358,10 +414,13 @@ function AddColumnModal({ onAdd, onClose }) {
 function calcCostAndYield(row, pc) {
   const offer = parseFloat(String(row.offer_price || "").replace(/[,$]/g, "")) || 0;
   const rent  = parseFloat(String(row.rental_appraisal || "").replace(/[,$]/g, "")) || 0;
-  if (!pc || !offer) return { cost_of_purchase: "", yield: "" };
-  const general = ["conveyancing","building_inspection","pest_inspection","loan_application",
-                   "lenders_mortgage_insurance","title_search","settlement_agent","other"]
-                  .reduce((s, k) => s + (parseFloat(pc[k]) || 0), 0);
+  if (!offer) return { cost_of_purchase: "", yield: "" };
+  // Use purchase costs if available, otherwise just stamp duty + offer
+  const general = pc
+    ? ["conveyancing","building_inspection","pest_inspection","loan_application",
+       "lenders_mortgage_insurance","title_search","settlement_agent","other"]
+      .reduce((s, k) => s + (parseFloat(pc[k]) || 0), 0)
+    : 0;
   const stampDuty = calcStampDuty(row.state, offer);
   const cop = offer + general + stampDuty;
   const yld = (rent > 0 && cop > 0) ? ((rent * 52 / cop) * 100).toFixed(2) : "";
@@ -452,7 +511,6 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
       price:     parsed.price     || "",
       config:    parsed.config    || "",
       land:      parsed.land      || "",
-      building:  parsed.building  || "",
       suburb:    parsed.suburb    || "",
       state:     parsed.state     || "",
       ph_rating: "",
