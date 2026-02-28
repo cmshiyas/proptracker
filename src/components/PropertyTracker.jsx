@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { loadTrackerData, saveTrackerRows, saveTrackerCols, loadPurchaseCosts } from "../firebase.js";
 import { calcStampDuty, formatCurrency } from "../stampDuty.js";
 import AdminPanel from "./AdminPanel.jsx";
@@ -215,14 +216,56 @@ function StarRating({ value, onChange }) {
   );
 }
 
+// ── Note Popup — renders in body portal to escape overflow:hidden ─────────────
+function NotePopup({ entries, anchorRef }) {
+  const [pos, setPos] = useState({ top:0, left:0 });
+  useEffect(() => {
+    if (!anchorRef.current) return;
+    const r = anchorRef.current.getBoundingClientRect();
+    const popW = 380;
+    let left = r.left + window.scrollX;
+    if (left + popW > window.innerWidth - 16) left = window.innerWidth - popW - 16;
+    setPos({ top: r.bottom + window.scrollY + 6, left });
+  }, [anchorRef]);
+
+  if (!entries || entries.length === 0) return null;
+  return createPortal(
+    <div style={{
+      position:"absolute", top:pos.top, left:pos.left, zIndex:99999,
+      background:"#fff", border:"1px solid #e2e8f0", borderRadius:12,
+      boxShadow:"0 8px 32px rgba(0,0,0,0.18)", padding:16, width:380,
+      maxHeight:480, overflowY:"auto", pointerEvents:"none",
+    }}>
+      {entries.map((e, i) => (
+        <div key={i} style={{ marginBottom: i < entries.length-1 ? 14 : 0 }}>
+          {e.ts && (
+            <div style={{ fontSize:10, color:"#94a3b8", fontWeight:700, textTransform:"uppercase", letterSpacing:0.8, marginBottom:4 }}>
+              {e.ts}
+            </div>
+          )}
+          <div style={{ fontSize:13, color:"#1e293b", whiteSpace:"pre-line", lineHeight:1.6 }}>
+            {e.text}
+          </div>
+          {i < entries.length-1 && <div style={{ borderBottom:"1px solid #f1f5f9", marginTop:14 }}/>}
+        </div>
+      ))}
+    </div>,
+    document.body
+  );
+}
+
 // ── Cell ───────────────────────────────────────────────────────────────────────
 function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse, analysing }) {
-  const [local, setLocal] = useState(value||"");
-  const ref = useRef();
+  const [local,    setLocal]    = useState(value||"");
+  const [hovering, setHovering] = useState(false);
+  const ref       = useRef();
+  const anchorRef = useRef();
   useEffect(()=>{
-    // For timestamped cols: clear local when starting a fresh edit
     if (col.id==="comments" || col.id==="agent_notes") {
-      if (!editing) setLocal("");
+      // When editing starts: show full history so user can see & append
+      // When editing ends: clear so next open is fresh
+      if (editing) setLocal(value||"");
+      else setLocal("");
     } else {
       setLocal(value||"");
     }
@@ -287,14 +330,24 @@ function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse
   };
 
   const commitTimestamped = () => {
-    // Preserve text exactly as typed (including newlines), only trim trailing whitespace
     const text = local.replace(/\s+$/, "");
-    if (text && text !== (parseEntries(value)[0]?.text || "")) {
-      const now = new Date();
-      const ts = `${String(now.getDate()).padStart(2,"0")}/${String(now.getMonth()+1).padStart(2,"0")}/${String(now.getFullYear()).slice(-2)} ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
-      const newEntry = ts + ":\n" + text;
-      const prev = value || "";
-      onChange(prev ? newEntry + "\n---\n" + prev : newEntry);
+    if (text !== (value || "").replace(/\s+$/, "")) {
+      // Content changed — check if user added new text at the top vs editing existing
+      const existingEntries = parseEntriesV2(value || "");
+      const existingRaw = existingEntries.map(e => e.ts + ":\n" + e.text).join("\n---\n");
+      // If the text starts with a known timestamp pattern it's being edited directly, save as-is
+      // Otherwise wrap the new portion with a timestamp
+      const startsWithTs = /^\d{2}\/\d{2}\/\d{2} \d{2}:\d{2}:/.test(text);
+      if (startsWithTs) {
+        onChange(text);
+      } else {
+        // New free-form note — prepend timestamp
+        const now = new Date();
+        const ts = `${String(now.getDate()).padStart(2,"0")}/${String(now.getMonth()+1).padStart(2,"0")}/${String(now.getFullYear()).slice(-2)} ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+        const newEntry = ts + ":\n" + text;
+        const prev = value ? value.replace(/\s+$/, "") : "";
+        onChange(prev ? newEntry + "\n---\n" + prev : newEntry);
+      }
     }
     onEndEdit();
   };
@@ -312,24 +365,31 @@ function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse
   };
 
   if (col.type==="textarea") return (
-    <div style={{ ...cs, alignItems:"flex-start", paddingTop:8, position:"relative", flexDirection:"column", gap:4 }}
+    <div style={{ ...cs, alignItems:"flex-start", paddingTop:8, position:"relative", flexDirection:"column", gap:4,
+      height: (isTimestamped && editing) ? "auto" : cs.height, minHeight: cs.height }}
       onClick={onStartEdit}>
       {editing ? (
         <textarea ref={ref} value={local} onChange={e=>setLocal(e.target.value)}
           onBlur={isTimestamped ? commitTimestamped : commit}
-          onKeyDown={e=>{ if(e.key==="Escape"){setLocal("");onEndEdit();} }}
-          placeholder={isTimestamped ? "Type note, click away to save with timestamp..." : ""}
-          style={{ ...inputStyle, height:54, resize:"none", lineHeight:1.5, fontSize:12 }}/>
+          onKeyDown={e=>{ if(e.key==="Escape"){setLocal(value||"");onEndEdit();} }}
+          placeholder={isTimestamped ? "Edit or append above existing notes..." : ""}
+          style={{ ...inputStyle, height: isTimestamped ? 120 : 54, resize:"vertical", lineHeight:1.5, fontSize:12 }}/>
       ) : isTimestamped ? (
-        <div style={{ width:"100%", overflow:"hidden" }}>
+        <div ref={anchorRef} style={{ width:"100%", overflow:"hidden", position:"relative" }}
+          onMouseEnter={()=>setHovering(true)} onMouseLeave={()=>setHovering(false)}>
           {parseEntriesV2(value).length > 0 ? parseEntriesV2(value).slice(0,1).map((e,i) => (
             <div key={i}>
               <div style={{ fontSize:9, color:"#94a3b8", fontWeight:600, marginBottom:1 }}>{e.ts}</div>
               <div style={{ fontSize:12, color:"#475569", overflow:"hidden", whiteSpace:"pre-line",
                 display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical" }}>{e.text}</div>
-              {parseEntriesV2(value).length > 1 && <div style={{ fontSize:10, color:"#94a3b8", marginTop:2 }}>+{parseEntriesV2(value).length-1} more entries</div>}
+              {parseEntriesV2(value).length > 1 && (
+                <div style={{ fontSize:10, color:"#0ea5e9", marginTop:2, fontWeight:500 }}>
+                  +{parseEntriesV2(value).length-1} more — hover to read
+                </div>
+              )}
             </div>
           )) : <span style={{ fontSize:12, color:"#cbd5e1" }}>Add note</span>}
+          {hovering && value && <NotePopup entries={parseEntriesV2(value)} anchorRef={anchorRef} />}
         </div>
       ) : (
         <span style={{ fontSize:12, color:value?"#475569":"#cbd5e1", overflow:"hidden", display:"-webkit-box", WebkitLineClamp:3, WebkitBoxOrient:"vertical", flex:1, width:"100%" }}>
@@ -345,8 +405,8 @@ function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse
     </div>
   );
   if (col.type==="readonly") return (
-    <div style={{ ...cs, cursor:"default", background:"#f8fafc" }}>
-      <span style={{ fontSize:13, fontWeight:700, color:value?"#0369a1":"#94a3b8", fontStyle:value?"normal":"italic" }}>
+    <div style={{ ...cs, cursor:"default", background:"#f8fafc", height:"auto", minHeight:48, alignItems:"center", flexWrap:"wrap" }}>
+      <span style={{ fontSize:13, fontWeight:700, color:value?"#0369a1":"#94a3b8", fontStyle:value?"normal":"italic", whiteSpace:"normal", wordBreak:"break-word" }}>
         {value || (col.id==="cost_of_purchase" ? "Enter offer price" : col.id==="yield" ? "Enter offer + rent" : "—")}
       </span>
     </div>
