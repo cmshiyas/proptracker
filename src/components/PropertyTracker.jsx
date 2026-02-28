@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import { loadTrackerData, saveTrackerRows, saveTrackerCols, loadPurchaseCosts } from "../firebase.js";
+import { loadTrackerData, saveTrackerRows, saveTrackerCols, loadPurchaseCosts, onPendingCountChange } from "../firebase.js";
 import { calcStampDuty, formatCurrency } from "../stampDuty.js";
 import AdminPanel from "./AdminPanel.jsx";
 
@@ -501,6 +501,7 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
   const [selectedRows, setSelectedRows] = useState(new Set());
   const [saving,       setSaving]       = useState(false);
   const [analysingRows,  setAnalysingRows]  = useState(new Set());
+  const [pendingCount,   setPendingCount]   = useState(0);
   const [purchaseCosts,  setPurchaseCosts]  = useState(null);
   const purchaseCostsRef = useRef(null);
 
@@ -513,6 +514,9 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
       if(c) setColumns(c);
     });
     loadPurchaseCosts().then(d => { if(d) { setPurchaseCosts(d); purchaseCostsRef.current = d; } });
+    // Real-time listener for pending access requests
+    const unsubPending = onPendingCountChange(count => setPendingCount(count));
+    return () => unsubPending();
   },[]);
 
   const saveRows     = useCallback(async (nr)=>{ setRows(nr); setSaving(true); await saveTrackerRows(nr); setSaving(false); },[]);
@@ -614,8 +618,13 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
             {isAdmin && (
               <button onClick={()=>setShowAdmin(true)}
-                style={{ background:"#f5f3ff", border:"1px solid #ddd6fe", borderRadius:8, padding:"7px 14px", color:"#7c3aed", cursor:"pointer", fontSize:13, fontWeight:600 }}>
+                style={{ background:"#f5f3ff", border:"1px solid #ddd6fe", borderRadius:8, padding:"7px 14px", color:"#7c3aed", cursor:"pointer", fontSize:13, fontWeight:600, display:"flex", alignItems:"center", gap:7, position:"relative" }}>
                 &#9881; Admin
+                {pendingCount > 0 && (
+                  <span style={{ background:"#ef4444", color:"#fff", borderRadius:"50%", width:18, height:18, fontSize:11, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1 }}>
+                    {pendingCount}
+                  </span>
+                )}
               </button>
             )}
             <div style={{ display:"flex", alignItems:"center", gap:8, background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:24, padding:"5px 14px 5px 6px" }}>

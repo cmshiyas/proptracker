@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from "firebase/auth";
-import { getFirestore, doc, getDoc, setDoc, collection, getDocs, deleteDoc } from "firebase/firestore";
+import { getFirestore, doc, getDoc, setDoc, collection, getDocs, deleteDoc, onSnapshot, query, where } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey:            "AIzaSyDbmG1zzpdFP3cmmCwy4-sUTQRPpFd9BIw",
@@ -34,13 +34,21 @@ export async function denyRequest(email) {
 export async function submitAccessRequest(user) {
   const ref  = doc(db, "access_requests", user.email);
   const snap = await getDoc(ref);
-  if (!snap.exists() || snap.data().status === "pending") {
-    await setDoc(ref, { email: user.email, name: user.displayName, photo: user.photoURL, status: "pending", requestedAt: Date.now() });
+  // Always write a fresh pending request unless already approved
+  if (!snap.exists() || snap.data().status !== "approved") {
+    await setDoc(ref, { email: user.email, name: user.displayName || "", photo: user.photoURL || "", status: "pending", requestedAt: Date.now() });
   }
 }
 export async function getPendingRequests() {
   const snap = await getDocs(collection(db, "access_requests"));
   return snap.docs.map(d => d.data()).filter(r => r.status === "pending");
+}
+// Real-time listener for pending request count — calls callback whenever count changes
+export function onPendingCountChange(callback) {
+  return onSnapshot(collection(db, "access_requests"), (snap) => {
+    const count = snap.docs.filter(d => d.data().status === "pending").length;
+    callback(count);
+  });
 }
 export async function getApprovedUsers() {
   const snap = await getDocs(collection(db, "approved_users"));
