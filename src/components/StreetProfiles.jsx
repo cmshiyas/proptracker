@@ -238,7 +238,7 @@ export default function StreetProfiles({ onBack, isAdmin }) {
           </button>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div style={{ width: 32, height: 32, borderRadius: 8, background: "linear-gradient(135deg,#f59e0b,#d97706)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>🏚</div>
-            <span style={{ fontFamily: "'Playfair Display',serif", fontWeight: 700, fontSize: 18, color: "#0f172a" }}>PropTracker</span>
+            <span style={{ fontFamily: "'Playfair Display',serif", fontWeight: 700, fontSize: 18, color: "#0f172a" }}>Property Analysis</span>
           </div>
           <span style={{ color: "#94a3b8" }}>/</span>
           <span style={{ color: "#0f172a", fontSize: 14, fontWeight: 600 }}>Street PH Profiles</span>

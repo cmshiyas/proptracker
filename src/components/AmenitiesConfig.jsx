@@ -97,7 +97,7 @@ export default function AmenitiesConfig({ onBack, isAdmin, user }) {
           </button>
           <div style={{ display:"flex", alignItems:"center", gap:8, flex:1 }}>
             <div style={{ width:30, height:30, borderRadius:8, background:"linear-gradient(135deg,#8b5cf6,#6d28d9)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:15 }}>⭐</div>
-            <span style={{ fontFamily:"'Playfair Display',serif", fontWeight:700, fontSize:17, color:"#0f172a" }}>PropTracker</span>
+            <span style={{ fontFamily:"'Playfair Display',serif", fontWeight:700, fontSize:17, color:"#0f172a" }}>Property Analysis</span>
             <span style={{ color:"#94a3b8" }}>/</span>
             <span style={{ color:"#0f172a", fontSize:14, fontWeight:600 }}>Amenities & Scoring</span>
           </div>

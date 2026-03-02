@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import { loadTrackerData, saveTrackerRows, saveTrackerCols, loadPurchaseCosts, onPendingCountChange, loadStreetProfiles, loadAmenities, DEFAULT_AMENITIES, loadUserAmenitiesSelections, saveUserAmenitiesSelections, loadUserAmenitiesConfig } from "../firebase.js";
+import { loadTrackerData, saveTrackerRows, saveTrackerCols, loadUserTrackerData, saveUserTrackerRows, saveUserTrackerCols, loadPurchaseCosts, onPendingCountChange, loadStreetProfiles, loadAmenities, DEFAULT_AMENITIES, loadUserAmenitiesSelections, saveUserAmenitiesSelections, loadUserAmenitiesConfig } from "../firebase.js";
 import { calcStampDuty, formatCurrency } from "../stampDuty.js";
 import AdminPanel from "./AdminPanel.jsx";
 
@@ -702,9 +702,18 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
   useEffect(() => { purchaseCostsRef.current = purchaseCosts; }, [purchaseCosts]);
 
   useEffect(()=>{
-    loadTrackerData().then(({ rows:r, cols:c })=>{
-      if(r){
-        // Migrate old rows: add address if missing, normalise ph_rating array→string
+    const initTracker = async () => {
+      // Try user's own data first; if none, seed from shared (first-time setup)
+      let { rows: r, cols: c } = await loadUserTrackerData(user.uid);
+      if (!r) {
+        const shared = await loadTrackerData();
+        r = shared.rows;
+        c = shared.cols;
+        // Save shared data as this user's starting point
+        if (r) await saveUserTrackerRows(user.uid, r);
+        if (c) await saveUserTrackerCols(user.uid, c);
+      }
+      if (r) {
         const migrated = r.map(row => ({
           address: "",
           ...row,
@@ -718,7 +727,8 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
       // Always use latest MANDATORY_COLUMNS for locked cols + preserve custom cols
       const customCols = c ? c.filter(sc => !sc.locked) : [];
       setColumns([...MANDATORY_COLUMNS, ...customCols]);
-    });
+    };
+    initTracker();
     loadPurchaseCosts().then(d => { if(d) { setPurchaseCosts(d); purchaseCostsRef.current = d; } });
     loadStreetProfiles().then(d => setStreetProfiles(d));
     // Load user's own amenities config; fall back to shared admin list, then hardcoded defaults
@@ -734,15 +744,15 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
 
   const saveRows     = useCallback(async (nr)=>{ 
     setRows(nr); setSaving(true); 
-    try { await saveTrackerRows(nr); setSaveError(""); } 
+    try { await saveUserTrackerRows(user.uid, nr); setSaveError(""); } 
     catch(e) { console.error("saveRows error:",e); setSaveError("Save failed: " + (e.code || e.message)); }
     setSaving(false); 
-  },[]);
+  },[user.uid]);
   const saveCols     = useCallback(async (nc)=>{ 
     setColumns(nc); 
-    try { await saveTrackerCols(nc); setSaveError(""); } 
+    try { await saveUserTrackerCols(user.uid, nc); setSaveError(""); } 
     catch(e) { console.error("saveCols error:",e); setSaveError("Save failed: " + (e.code || e.message)); }
-  },[]);
+  },[user.uid]);
   const updateCell = (rowId, colId, v) => {
     setRows(prev => {
       const updated = prev.map(r => {
@@ -756,7 +766,7 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
       });
       // Save to Firestore in background
       setSaving(true);
-      saveTrackerRows(updated).then(() => { setSaving(false); setSaveError(""); }).catch(e => { setSaving(false); setSaveError("Save failed: " + (e.code || e.message)); console.error("updateCell save error:",e); });
+      saveUserTrackerRows(user.uid, updated).then(() => { setSaving(false); setSaveError(""); }).catch(e => { setSaving(false); setSaveError("Save failed: " + (e.code || e.message)); console.error("updateCell save error:",e); });
       return updated;
     });
   };
@@ -877,7 +887,7 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
               ☰
             </button>
             <div style={{ width:30, height:30, borderRadius:8, background:"linear-gradient(135deg,#0ea5e9,#0369a1)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:15 }}>&#127968;</div>
-            <span style={{ fontFamily:"'Playfair Display', serif", fontWeight:700, fontSize:17, color:"#0f172a" }}>PropTracker</span>
+            <span style={{ fontFamily:"'Playfair Display', serif", fontWeight:700, fontSize:17, color:"#0f172a" }}>Property Analysis</span>
             {saving && <span style={{ color:"#94a3b8", fontSize:10, background:"#f1f5f9", borderRadius:20, padding:"2px 8px" }}>Saving…</span>}
             {saveError && <span style={{ color:"#dc2626", fontSize:10, background:"#fef2f2", border:"1px solid #fecaca", borderRadius:20, padding:"2px 8px" }}>⚠ {saveError}</span>}
           </div>
@@ -931,40 +941,34 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
         <div className="page-header" style={{ padding:"24px 20px 16px", borderBottom:"1px solid #e2e8f0", background:"#fff" }}>
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:16 }}>
             <div>
-              <p style={{ margin:"0 0 4px", color:"#94a3b8", fontSize:12, fontWeight:600, letterSpacing:2, textTransform:"uppercase" }}>Portfolio Analysis</p>
+              <p style={{ margin:"0 0 4px", color:"#94a3b8", fontSize:12, fontWeight:600, letterSpacing:2, textTransform:"uppercase" }}>Property Analysis</p>
               <h1 className="page-title" style={{ margin:0, fontFamily:"'Playfair Display', serif", fontSize:28, fontWeight:700, color:"#0f172a", letterSpacing:-0.5 }}>
                 Property Dashboard
               </h1>
             </div>
             <div className="actions-bar" style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
-              {isAdmin && selectedRows.size>0 && (
+              {selectedRows.size>0 && (
                 <button onClick={deleteRows}
                   style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:8, padding:"9px 16px", color:"#dc2626", cursor:"pointer", fontSize:13, fontWeight:500 }}>
                   Delete {selectedRows.size} selected
                 </button>
               )}
-              {isAdmin && (
-                <button onClick={()=>setShowAddCol(true)}
-                  style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:8, padding:"9px 16px", color:"#64748b", cursor:"pointer", fontSize:13, fontWeight:500 }}>
-                  + Column
-                </button>
-              )}
-              {isAdmin && (
-                <button onClick={addRow}
-                  style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:8, padding:"9px 16px", color:"#64748b", cursor:"pointer", fontSize:13, fontWeight:500 }}>
-                  + Empty Row
-                </button>
-              )}
+              <button onClick={()=>setShowAddCol(true)}
+                style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:8, padding:"9px 16px", color:"#64748b", cursor:"pointer", fontSize:13, fontWeight:500 }}>
+                + Column
+              </button>
+              <button onClick={addRow}
+                style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:8, padding:"9px 16px", color:"#64748b", cursor:"pointer", fontSize:13, fontWeight:500 }}>
+                + Empty Row
+              </button>
               <button onClick={recalcPH}
                 style={{ background:"#fffbeb", border:"1px solid #fde68a", borderRadius:8, padding:"9px 16px", color:"#b45309", cursor:"pointer", fontSize:13, fontWeight:600, display:"flex", alignItems:"center", gap:6 }}>
                 &#8635; PH Recalculate
               </button>
-              {isAdmin && (
-                <button onClick={()=>setShowQuickAdd(true)}
-                  style={{ background:"#0ea5e9", border:"none", borderRadius:8, padding:"10px 20px", color:"#fff", cursor:"pointer", fontSize:13, fontWeight:600, boxShadow:"0 2px 8px rgba(14,165,233,0.35)", display:"flex", alignItems:"center", gap:6 }}>
-                  &#10024; Add Property
-                </button>
-              )}
+              <button onClick={()=>setShowQuickAdd(true)}
+                style={{ background:"#0ea5e9", border:"none", borderRadius:8, padding:"10px 20px", color:"#fff", cursor:"pointer", fontSize:13, fontWeight:600, boxShadow:"0 2px 8px rgba(14,165,233,0.35)", display:"flex", alignItems:"center", gap:6 }}>
+                &#10024; Add Property
+              </button>
             </div>
           </div>
 
@@ -1015,16 +1019,11 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
             {rows.map((row,idx)=>(
               <div key={row.id} className="rh"
                 style={{ display:"flex", background:idx%2===0?"#fff":"#fafbfc", borderBottom:"1px solid #f1f5f9" }}>
-                {isAdmin && (
-                  <div style={{ width:52, minWidth:52, display:"flex", alignItems:"center", justifyContent:"center", borderRight:"1px solid #e2e8f0", background:"inherit" }}>
-                    <input type="checkbox" style={{ accentColor:"#0ea5e9", cursor:"pointer", width:15, height:15 }}
-                      checked={selectedRows.has(row.id)}
-                      onChange={e=>{ const s=new Set(selectedRows); e.target.checked?s.add(row.id):s.delete(row.id); setSelectedRows(s); }}/>
-                  </div>
-                )}
-                {!isAdmin && (
-                  <div style={{ width:52, minWidth:52, borderRight:"1px solid #e2e8f0", background:"inherit" }}/>
-                )}
+                <div style={{ width:52, minWidth:52, display:"flex", alignItems:"center", justifyContent:"center", borderRight:"1px solid #e2e8f0", background:"inherit" }}>
+                  <input type="checkbox" style={{ accentColor:"#0ea5e9", cursor:"pointer", width:15, height:15 }}
+                    checked={selectedRows.has(row.id)}
+                    onChange={e=>{ const s=new Set(selectedRows); e.target.checked?s.add(row.id):s.delete(row.id); setSelectedRows(s); }}/>
+                </div>
                 {columns.map(col=>{
                   // For calc_ph, inject address + street profiles for live lookup
                   const userSelForRow = userAmenSel[String(row.id)] || [];
@@ -1044,19 +1043,18 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
                     <Cell key={col.id} col={enrichedCol} value={row[col.id]}
                       onChange={handleCellChange}
                       editing={editing?.rowId===row.id&&editing?.colId===col.id}
-                      onStartEdit={()=>{ if(isAdmin || col.type==="amenities") setEditing({rowId:row.id,colId:col.id}); }}
+                      onStartEdit={()=>setEditing({rowId:row.id,colId:col.id})}
                       onEndEdit={()=>setEditing(null)}
                       onAnalyse={null}
                       analysing={false}
-                      readonly={!isAdmin && enrichedCol.type !== "amenities"}/>
+                      readonly={false}/>
                   );
                 })}
               </div>
             ))}
 
             {/* Add Row footer — admin only */}
-            {isAdmin && (
-              <div onClick={addRow}
+            <div onClick={addRow}
                 style={{ display:"flex", height:44, cursor:"pointer", borderTop:"1px solid #f1f5f9", background:"#fafbfc" }}
                 onMouseEnter={e=>e.currentTarget.style.background="#f1f5f9"}
                 onMouseLeave={e=>e.currentTarget.style.background="#fafbfc"}>
@@ -1065,7 +1063,6 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
                   Click to add a new row...
                 </div>
               </div>
-            )}
           </div>
         </div>
 

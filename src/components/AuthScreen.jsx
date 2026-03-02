@@ -40,7 +40,7 @@ export default function AuthScreen() {
             </div>
 
             <h1 style={{ fontFamily:"'Playfair Display', serif", fontSize:36, fontWeight:700, color:"#0f172a", margin:"0 0 10px", letterSpacing:-0.5 }}>
-              PropTracker
+              Property Analysis
             </h1>
             <p style={{ color:"#64748b", fontSize:15, margin:"0 0 36px", lineHeight:1.7 }}>
               Property portfolio analysis<br/>for serious investors.
@@ -80,7 +80,7 @@ export default function AuthScreen() {
           </div>
 
           <p style={{ textAlign:"center", color:"#cbd5e1", fontSize:12, marginTop:20 }}>
-            PropTracker &copy; {new Date().getFullYear()}
+            Property Analysis &copy; {new Date().getFullYear()}
           </p>
         </div>
         <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>

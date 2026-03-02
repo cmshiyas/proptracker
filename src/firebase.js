@@ -91,6 +91,23 @@ export async function loadTrackerData() {
 export async function saveTrackerRows(rows) { await setDoc(sharedDoc("tracker_rows"), { value: rows }); }
 export async function saveTrackerCols(cols) { await setDoc(sharedDoc("tracker_cols"), { value: cols }); }
 
+// ── Per-user Tracker Data (each user has their own rows; cols shared) ──────────
+export async function loadUserTrackerData(uid) {
+  const [rowsSnap, colsSnap] = await Promise.all([
+    getDoc(userDoc(uid, "tracker_rows")),
+    getDoc(userDoc(uid, "tracker_cols")),
+  ]);
+  const rows = rowsSnap.exists() ? rowsSnap.data().value : null;
+  const cols = colsSnap.exists() ? colsSnap.data().value : null;
+  return { rows, cols };
+}
+export async function saveUserTrackerRows(uid, rows) {
+  await setDoc(userDoc(uid, "tracker_rows"), { value: rows });
+}
+export async function saveUserTrackerCols(uid, cols) {
+  await setDoc(userDoc(uid, "tracker_cols"), { value: cols });
+}
+
 // ── Purchase costs (shared, all users read, admin-only write) ──────────────────
 export async function loadPurchaseCosts() {
   const snap = await getDoc(sharedDoc("purchase_costs"));
