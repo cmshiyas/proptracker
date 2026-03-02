@@ -9,18 +9,19 @@ service cloud.firestore {
          request.auth.token.email == "cmshiyas007@gmail.com");
       allow write: if request.auth != null && request.auth.token.email == "cmshiyas007@gmail.com";
     }
-    // Admin can list + read all; users can read/write their own
+    // Allow admin to LIST + READ all documents in approved_users
+    match /approved_users/{document=**} {
+      allow read, list: if request.auth != null && request.auth.token.email == "cmshiyas007@gmail.com";
+    }
+
+    // Admin can list + read all; users can read/write their own request
     match /access_requests/{email} {
       allow read, write: if request.auth != null &&
         (request.auth.token.email == email ||
          request.auth.token.email == "cmshiyas007@gmail.com");
     }
-    // Allow admin to LIST (getDocs/onSnapshot) the full collections
     match /access_requests/{document=**} {
-      allow list: if request.auth != null && request.auth.token.email == "cmshiyas007@gmail.com";
-    }
-    match /approved_users/{document=**} {
-      allow list: if request.auth != null && request.auth.token.email == "cmshiyas007@gmail.com";
+      allow read, list: if request.auth != null && request.auth.token.email == "cmshiyas007@gmail.com";
     }
 
     // ── Shared data — all authenticated users read, admin-only write ──────────

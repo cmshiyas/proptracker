@@ -25,9 +25,13 @@ export async function getApprovedUser(email) {
   const snap = await getDoc(doc(db, "approved_users", email));
   return snap.exists() ? snap.data() : null;
 }
-export async function approveUser(userData) {
-  await setDoc(doc(db, "approved_users", userData.email), { ...userData, approvedAt: Date.now() });
-  await setDoc(doc(db, "access_requests", userData.email), { ...userData, status: "approved" });
+export async function approveUser(userData, accessType = "guest") {
+  await setDoc(doc(db, "approved_users", userData.email), { ...userData, approvedAt: Date.now(), accessType });
+  await setDoc(doc(db, "access_requests", userData.email), { ...userData, status: "approved", accessType });
+}
+export async function updateUserAccessType(email, accessType) {
+  const snap = await getDoc(doc(db, "approved_users", email));
+  if (snap.exists()) await setDoc(doc(db, "approved_users", email), { ...snap.data(), accessType });
 }
 export async function revokeUser(email) { await deleteDoc(doc(db, "approved_users", email)); }
 export async function denyRequest(email) {
