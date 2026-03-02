@@ -887,6 +887,10 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
               style={{ background:"#f5f3ff", border:"1px solid #ddd6fe", borderRadius:8, padding:"6px 12px", color:"#7c3aed", cursor:"pointer", fontSize:12, fontWeight:500, whiteSpace:"nowrap" }}>
               ⭐ Amenities
             </button>
+            <button onClick={()=>{ onNavigate&&onNavigate("dsr"); setNavOpen(false); }}
+              style={{ background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:8, padding:"6px 12px", color:"#0369a1", cursor:"pointer", fontSize:12, fontWeight:500, whiteSpace:"nowrap" }}>
+              📊 DSR Data
+            </button>
           </div>
           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
             {isAdmin && (

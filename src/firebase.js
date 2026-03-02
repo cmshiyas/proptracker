@@ -135,3 +135,12 @@ export async function loadAmenities() {
 export async function saveAmenities(items) {
   await setDoc(sharedDoc("amenities_config"), { items });
 }
+
+// ── DSR Data (shared, admin-only write) ───────────────────────────────────────
+export async function loadDsrData() {
+  const snap = await getDoc(sharedDoc("dsr_data"));
+  return snap.exists() ? snap.data().rows || [] : [];
+}
+export async function saveDsrData(rows) {
+  await setDoc(sharedDoc("dsr_data"), { rows, updatedAt: Date.now() });
+}
