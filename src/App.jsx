@@ -51,7 +51,7 @@ export default function App() {
   if (page === "purchase-costs")  return <PurchaseCosts   onBack={() => setPage("dashboard")} />;
   if (page === "suburb-profiles")  return <SuburbProfiles  onBack={() => setPage("dashboard")} isAdmin={user.email === ADMIN_EMAIL} />;
   if (page === "street-profiles")   return <StreetProfiles   onBack={() => setPage("dashboard")} isAdmin={user.email === ADMIN_EMAIL} />;
-  if (page === "amenities")          return <AmenitiesConfig  onBack={() => setPage("dashboard")} isAdmin={user.email === ADMIN_EMAIL} />;
+  if (page === "amenities")          return <AmenitiesConfig  onBack={() => setPage("dashboard")} isAdmin={user.email === ADMIN_EMAIL} user={user} />;
   if (page === "dsr")                return <DsrData         onBack={() => setPage("dashboard")} isAdmin={user.email === ADMIN_EMAIL} />;
 
   return (

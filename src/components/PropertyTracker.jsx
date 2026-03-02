@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import { loadTrackerData, saveTrackerRows, saveTrackerCols, loadPurchaseCosts, onPendingCountChange, loadStreetProfiles, loadAmenities } from "../firebase.js";
+import { loadTrackerData, saveTrackerRows, saveTrackerCols, loadPurchaseCosts, onPendingCountChange, loadStreetProfiles, loadAmenities, DEFAULT_AMENITIES, loadUserAmenitiesSelections, saveUserAmenitiesSelections, loadUserAmenitiesConfig } from "../firebase.js";
 import { calcStampDuty, formatCurrency } from "../stampDuty.js";
 import AdminPanel from "./AdminPanel.jsx";
 
@@ -370,8 +370,11 @@ function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse
     );
   }
   if (col.type==="amenities") {
-    const selected = Array.isArray(value) ? value : [];
+    // Per-user selections stored separately — read from col._userSel
+    const selected = Array.isArray(col._userSel) ? col._userSel : [];
     const allItems = col._amenitiesCfg || [];
+    const uid      = col._uid || "";
+    const rowId    = String(col._rowId || "");
     const [open, setOpenAm] = useState(false);
     const [dropPos, setDropPos] = useState({ top:0, left:0, width:0 });
     const triggerRef = useRef();
@@ -389,10 +392,9 @@ function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse
     }, [open]);
 
     const handleOpen = () => {
-      if (readonly) return;
       const rect = triggerRef.current?.getBoundingClientRect();
       if (rect) {
-        const dropH = Math.min(280, allItems.length * 45 + 40);
+        const dropH = Math.min(300, allItems.length * 45 + 48);
         const spaceBelow = window.innerHeight - rect.bottom;
         const top = spaceBelow < dropH + 8 ? rect.top + window.scrollY - dropH - 4 : rect.bottom + window.scrollY + 4;
         setDropPos({ top, left: rect.left + window.scrollX, width: Math.max(240, rect.width) });
@@ -400,32 +402,37 @@ function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse
       setOpenAm(o => !o);
     };
 
-    const toggle = (name) => {
-      if (readonly) return;
-      onChange(selected.includes(name) ? selected.filter(s=>s!==name) : [...selected, name]);
+    const toggle = async (name) => {
+      const next = selected.includes(name)
+        ? selected.filter(s => s !== name)
+        : [...selected, name];
+      // optimistic update via onChange (updates parent userAmenSel state)
+      onChange(next);
+      // persist to user's own Firestore path
+      await saveUserAmenitiesSelections(uid, { ...col._allSel, [rowId]: next });
     };
 
     return (
-      <div ref={triggerRef} style={{ ...cs, cursor: readonly ? "default" : "pointer" }}
-        onClick={handleOpen}>
+      <div ref={triggerRef} style={{ ...cs, cursor:"pointer" }} onClick={handleOpen}>
         <div style={{ display:"flex", gap:4, flexWrap:"nowrap", overflow:"hidden", flex:1, alignItems:"center" }}>
           {selected.length === 0
-            ? <span style={{ color:"#cbd5e1", fontSize:12 }}>{readonly ? "—" : "Select…"}</span>
+            ? <span style={{ color:"#cbd5e1", fontSize:12 }}>Select…</span>
             : selected.slice(0,3).map(n => (
                 <span key={n} style={{ background:"#f5f3ff", border:"1px solid #ddd6fe", borderRadius:20, padding:"1px 7px", fontSize:10, fontWeight:600, color:"#7c3aed", whiteSpace:"nowrap" }}>{n}</span>
               ))
           }
           {selected.length > 3 && <span style={{ fontSize:10, color:"#94a3b8" }}>+{selected.length-3}</span>}
         </div>
-        {open && !readonly && createPortal(
+        {open && createPortal(
           <div id="amenities-portal" style={{
             position:"absolute", top: dropPos.top, left: dropPos.left,
             width: dropPos.width, zIndex:99999,
             background:"#fff", border:"1px solid #e2e8f0", borderRadius:12,
-            boxShadow:"0 8px 32px rgba(0,0,0,0.15)", maxHeight:280, overflowY:"auto", padding:8,
+            boxShadow:"0 8px 32px rgba(0,0,0,0.15)", maxHeight:300, overflowY:"auto", padding:8,
           }} onClick={e=>e.stopPropagation()}>
-            <div style={{ fontSize:10, color:"#94a3b8", fontWeight:700, textTransform:"uppercase", letterSpacing:1, padding:"4px 8px 8px" }}>
-              Select Amenities
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"4px 8px 8px" }}>
+              <span style={{ fontSize:10, color:"#94a3b8", fontWeight:700, textTransform:"uppercase", letterSpacing:1 }}>Your Amenities</span>
+              <span style={{ fontSize:10, color:"#7c3aed", fontWeight:600 }}>{selected.length} selected</span>
             </div>
             {allItems.length === 0
               ? <div style={{ padding:"8px 12px", color:"#94a3b8", fontSize:12 }}>No amenities configured yet</div>
@@ -687,6 +694,7 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
   const [streetProfiles, setStreetProfiles] = useState([]);
   const [navOpen,        setNavOpen]        = useState(false);
   const [amenitiesCfg,   setAmenitiesCfg]   = useState([]);
+  const [userAmenSel,    setUserAmenSel]    = useState({}); // { rowId: [names] }
   const [purchaseCosts,  setPurchaseCosts]  = useState(null);
   const purchaseCostsRef = useRef(null);
 
@@ -702,7 +710,6 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
           ...row,
           ph_rating: Array.isArray(row.ph_rating) ? (row.ph_rating[0] || "") : (row.ph_rating || ""),
           calc_ph: row.calc_ph || "",
-          amenities: Array.isArray(row.amenities) ? row.amenities : [],
           score_card: row.score_card || "",
         }));
         setRows(migrated);
@@ -714,7 +721,12 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
     });
     loadPurchaseCosts().then(d => { if(d) { setPurchaseCosts(d); purchaseCostsRef.current = d; } });
     loadStreetProfiles().then(d => setStreetProfiles(d));
-    loadAmenities().then(d => setAmenitiesCfg(d));
+    // Load user's own amenities config; fall back to shared admin list, then hardcoded defaults
+    Promise.all([loadAmenities(), loadUserAmenitiesConfig(user.uid)]).then(([shared, userCfg]) => {
+      const master = shared.length > 0 ? shared : DEFAULT_AMENITIES;
+      setAmenitiesCfg(userCfg && userCfg.length > 0 ? userCfg : master);
+    });
+    loadUserAmenitiesSelections(user.uid).then(sel => setUserAmenSel(sel || {}));
     // Real-time listener for pending access requests
     const unsubPending = onPendingCountChange(count => setPendingCount(count));
     return () => unsubPending();
@@ -1015,22 +1027,28 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
                 )}
                 {columns.map(col=>{
                   // For calc_ph, inject address + street profiles for live lookup
+                  const userSelForRow = userAmenSel[String(row.id)] || [];
                   const enrichedCol = col.type==="calc_ph"
                     ? { ...col, _rowAddress: row.address||"", _streetProfiles: streetProfiles }
                     : col.type==="amenities"
-                    ? { ...col, _amenitiesCfg: amenitiesCfg }
+                    ? { ...col, _amenitiesCfg: amenitiesCfg, _rowId: row.id, _userSel: userSelForRow, _uid: user.uid, _allSel: userAmenSel }
                     : col.type==="score_card"
-                    ? { ...col, _amenitiesCfg: amenitiesCfg, _rowAmenities: Array.isArray(row.amenities)?row.amenities:[] }
+                    ? { ...col, _amenitiesCfg: amenitiesCfg, _rowAmenities: userSelForRow }
                     : col;
+                  const handleCellChange = col.type==="amenities"
+                    ? (next) => setUserAmenSel(prev => ({ ...prev, [String(row.id)]: next }))
+                    : col.type==="score_card"
+                    ? () => {}  // score_card is computed, no direct edit
+                    : (v) => updateCell(row.id, col.id, v);
                   return (
                     <Cell key={col.id} col={enrichedCol} value={row[col.id]}
-                      onChange={v=>updateCell(row.id,col.id,v)}
+                      onChange={handleCellChange}
                       editing={editing?.rowId===row.id&&editing?.colId===col.id}
-                      onStartEdit={()=>{ if(isAdmin) setEditing({rowId:row.id,colId:col.id}); }}
+                      onStartEdit={()=>{ if(isAdmin || col.type==="amenities") setEditing({rowId:row.id,colId:col.id}); }}
                       onEndEdit={()=>setEditing(null)}
                       onAnalyse={null}
                       analysing={false}
-                      readonly={!isAdmin}/>
+                      readonly={!isAdmin && enrichedCol.type !== "amenities"}/>
                   );
                 })}
               </div>

@@ -57,7 +57,7 @@ export async function getApprovedUsers() {
 }
 
 // ── Per-user helpers ───────────────────────────────────────────────────────────
-const userDoc    = (uid, ...path) => doc(db, "users", uid, ...path);
+const userDoc    = (uid, docName) => doc(db, "users", uid, "data", docName);
 const sharedDoc  = (...path)       => doc(db, "shared", ...path);
 
 // ── Tracker data (shared, all users read, admin-only write) ───────────────────
@@ -128,9 +128,19 @@ export async function saveStreetProfiles(entries) {
 }
 
 // ── Amenities Config (shared, admin-only write) ────────────────────────────────
+export const DEFAULT_AMENITIES = [
+  { id: 1, name: "Solar Panels",      score: 8 },
+  { id: 2, name: "Shed",              score: 4 },
+  { id: 3, name: "Backyard Access",   score: 6 },
+  { id: 4, name: "Double Garage",     score: 5 },
+  { id: 5, name: "Granny Flat",       score: 10 },
+  { id: 6, name: "Swimming Pool",     score: 6 },
+  { id: 7, name: "Ducted AC",         score: 7 },
+  { id: 8, name: "Renovated Kitchen", score: 6 },
+];
 export async function loadAmenities() {
   const snap = await getDoc(sharedDoc("amenities_config"));
-  return snap.exists() ? snap.data().items || [] : [];
+  return snap.exists() ? (snap.data().items || DEFAULT_AMENITIES) : DEFAULT_AMENITIES;
 }
 export async function saveAmenities(items) {
   await setDoc(sharedDoc("amenities_config"), { items });
@@ -143,4 +153,23 @@ export async function loadDsrData() {
 }
 export async function saveDsrData(rows) {
   await setDoc(sharedDoc("dsr_data"), { rows, updatedAt: Date.now() });
+}
+
+// ── Per-user Amenities Selections (each user has their own per-property selections) ──
+export async function loadUserAmenitiesSelections(uid) {
+  const snap = await getDoc(userDoc(uid, "amenities_selections"));
+  return snap.exists() ? snap.data().selections || {} : {};
+}
+export async function saveUserAmenitiesSelections(uid, selections) {
+  await setDoc(userDoc(uid, "amenities_selections"), { selections, updatedAt: Date.now() });
+}
+
+// ── Per-user Amenities Config (non-admin users store their own list here) ──────
+// Falls back to shared admin config if user has no personal config yet
+export async function loadUserAmenitiesConfig(uid) {
+  const snap = await getDoc(userDoc(uid, "amenities_config"));
+  return snap.exists() ? snap.data().items || null : null;
+}
+export async function saveUserAmenitiesConfig(uid, items) {
+  await setDoc(userDoc(uid, "amenities_config"), { items, updatedAt: Date.now() });
 }
