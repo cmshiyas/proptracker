@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import { loadTrackerData, saveTrackerRows, saveTrackerCols, loadPurchaseCosts, onPendingCountChange, loadStreetProfiles } from "../firebase.js";
+import { loadTrackerData, saveTrackerRows, saveTrackerCols, loadPurchaseCosts, onPendingCountChange, loadStreetProfiles, loadAmenities } from "../firebase.js";
 import { calcStampDuty, formatCurrency } from "../stampDuty.js";
 import AdminPanel from "./AdminPanel.jsx";
 
@@ -20,11 +20,13 @@ const MANDATORY_COLUMNS = [
   { id:"yield",           label:"Yield %",           type:"readonly", width:110, locked:true },
   { id:"comments",        label:"Comments",          type:"textarea", width:200, locked:true },
   { id:"agent_notes",     label:"Agent Notes",       type:"textarea", width:200, locked:true },
+  { id:"amenities",        label:"Amenities",          type:"amenities", width:220, locked:true },
+  { id:"score_card",       label:"Score Card",         type:"score_card", width:140, locked:true },
 ];
 
 const INITIAL_ROWS = [
-  { id:1, address:"", property:"", price:"", config:"", land:"", ph_rating:"", calc_ph:"", suburb:"", state:"", type:"", offer_price:"", rental_appraisal:"", cost_of_purchase:"", yield:"", comments:"", agent_notes:"" },
-  { id:2, address:"", property:"", price:"", config:"", land:"", ph_rating:"", calc_ph:"", suburb:"", state:"", type:"", offer_price:"", rental_appraisal:"", cost_of_purchase:"", yield:"", comments:"", agent_notes:"" },
+  { id:1, address:"", property:"", price:"", config:"", land:"", ph_rating:"", calc_ph:"", suburb:"", state:"", type:"", offer_price:"", rental_appraisal:"", cost_of_purchase:"", yield:"", comments:"", agent_notes:"", amenities:[], score_card:"" },
+  { id:2, address:"", property:"", price:"", config:"", land:"", ph_rating:"", calc_ph:"", suburb:"", state:"", type:"", offer_price:"", rental_appraisal:"", cost_of_purchase:"", yield:"", comments:"", agent_notes:"", amenities:[], score_card:"" },
 ];
 
 // ── AI Property Extractor (via Firebase Cloud Function proxy) ─────────────────
@@ -277,7 +279,7 @@ function PhTag({ colour }) {
 }
 
 // ── Cell ───────────────────────────────────────────────────────────────────────
-function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse, analysing }) {
+function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse, analysing, readonly }) {
   const [local,    setLocal]    = useState(value||"");
   const [hovering, setHovering] = useState(false);
   const ref       = useRef();
@@ -304,7 +306,7 @@ function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse
     borderRight:"1px solid #e2e8f0", borderBottom:"1px solid #e2e8f0",
     overflow:"hidden", flexShrink:0,
     background: editing?"#f0f9ff":"transparent",
-    cursor:"text", transition:"background 0.1s",
+    cursor: readonly ? "default" : "text", transition:"background 0.1s",
   };
 
   const inputStyle = { width:"100%", background:"transparent", border:"none", outline:"none", color:"#1e293b", fontSize:13, fontFamily:"inherit" };
@@ -326,12 +328,14 @@ function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse
       <div style={{ ...cs, background: cellBg, padding:"0 8px", transition:"background 0.2s" }}>
         <select
           value={value || ""}
-          onChange={e => onChange(e.target.value)}
+          onChange={e => !readonly && onChange(e.target.value)}
+          disabled={readonly}
           style={{
             width:"100%", border:"none", outline:"none", fontFamily:"inherit",
-            fontSize:12, fontWeight:700, cursor:"pointer",
+            fontSize:12, fontWeight:700, cursor: readonly ? "default" : "pointer",
             background:"transparent",
             color: s ? s.text : "#94a3b8",
+            opacity: 1,
           }}>
           <option value="">— Select —</option>
           {PH_OPTIONS.map(opt => (
@@ -365,17 +369,126 @@ function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse
       </div>
     );
   }
+  if (col.type==="amenities") {
+    const selected = Array.isArray(value) ? value : [];
+    const allItems = col._amenitiesCfg || [];
+    const [open, setOpenAm] = useState(false);
+    const [dropPos, setDropPos] = useState({ top:0, left:0, width:0 });
+    const triggerRef = useRef();
+
+    useEffect(() => {
+      if (!open) return;
+      const handler = (e) => {
+        if (triggerRef.current && !triggerRef.current.contains(e.target) &&
+            !document.getElementById("amenities-portal")?.contains(e.target)) {
+          setOpenAm(false);
+        }
+      };
+      document.addEventListener("mousedown", handler);
+      return () => document.removeEventListener("mousedown", handler);
+    }, [open]);
+
+    const handleOpen = () => {
+      if (readonly) return;
+      const rect = triggerRef.current?.getBoundingClientRect();
+      if (rect) {
+        const dropH = Math.min(280, allItems.length * 45 + 40);
+        const spaceBelow = window.innerHeight - rect.bottom;
+        const top = spaceBelow < dropH + 8 ? rect.top + window.scrollY - dropH - 4 : rect.bottom + window.scrollY + 4;
+        setDropPos({ top, left: rect.left + window.scrollX, width: Math.max(240, rect.width) });
+      }
+      setOpenAm(o => !o);
+    };
+
+    const toggle = (name) => {
+      if (readonly) return;
+      onChange(selected.includes(name) ? selected.filter(s=>s!==name) : [...selected, name]);
+    };
+
+    return (
+      <div ref={triggerRef} style={{ ...cs, cursor: readonly ? "default" : "pointer" }}
+        onClick={handleOpen}>
+        <div style={{ display:"flex", gap:4, flexWrap:"nowrap", overflow:"hidden", flex:1, alignItems:"center" }}>
+          {selected.length === 0
+            ? <span style={{ color:"#cbd5e1", fontSize:12 }}>{readonly ? "—" : "Select…"}</span>
+            : selected.slice(0,3).map(n => (
+                <span key={n} style={{ background:"#f5f3ff", border:"1px solid #ddd6fe", borderRadius:20, padding:"1px 7px", fontSize:10, fontWeight:600, color:"#7c3aed", whiteSpace:"nowrap" }}>{n}</span>
+              ))
+          }
+          {selected.length > 3 && <span style={{ fontSize:10, color:"#94a3b8" }}>+{selected.length-3}</span>}
+        </div>
+        {open && !readonly && createPortal(
+          <div id="amenities-portal" style={{
+            position:"absolute", top: dropPos.top, left: dropPos.left,
+            width: dropPos.width, zIndex:99999,
+            background:"#fff", border:"1px solid #e2e8f0", borderRadius:12,
+            boxShadow:"0 8px 32px rgba(0,0,0,0.15)", maxHeight:280, overflowY:"auto", padding:8,
+          }} onClick={e=>e.stopPropagation()}>
+            <div style={{ fontSize:10, color:"#94a3b8", fontWeight:700, textTransform:"uppercase", letterSpacing:1, padding:"4px 8px 8px" }}>
+              Select Amenities
+            </div>
+            {allItems.length === 0
+              ? <div style={{ padding:"8px 12px", color:"#94a3b8", fontSize:12 }}>No amenities configured yet</div>
+              : allItems.map(item => {
+                  const checked = selected.includes(item.name);
+                  return (
+                    <div key={item.id} onClick={()=>toggle(item.name)}
+                      style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 10px", borderRadius:8, cursor:"pointer", background: checked?"#f5f3ff":"transparent", transition:"background 0.1s" }}>
+                      <div style={{ width:16, height:16, borderRadius:4, border:`2px solid ${checked?"#8b5cf6":"#d1d5db"}`, background:checked?"#8b5cf6":"transparent", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                        {checked && <span style={{ color:"#fff", fontSize:10, fontWeight:700 }}>✓</span>}
+                      </div>
+                      <span style={{ flex:1, fontSize:13, color: checked?"#7c3aed":"#374151", fontWeight: checked?600:400 }}>{item.name}</span>
+                      <span style={{ fontSize:11, color:"#94a3b8", background:"#f1f5f9", borderRadius:10, padding:"1px 6px" }}>{item.score}pts</span>
+                    </div>
+                  );
+                })
+            }
+          </div>,
+          document.body
+        )}
+      </div>
+    );
+  }
+  if (col.type==="score_card") {
+    const selected  = Array.isArray(col._rowAmenities) ? col._rowAmenities : [];
+    const allItems  = col._amenitiesCfg || [];
+    const total     = selected.reduce((s, name) => {
+      const item = allItems.find(i => i.name === name);
+      return s + (item ? item.score : 0);
+    }, 0);
+    const maxScore  = allItems.reduce((s, i) => s + i.score, 0);
+    const pct       = maxScore > 0 ? total / maxScore : 0;
+    const colour    = pct >= 0.7 ? "#10b981" : pct >= 0.4 ? "#f59e0b" : total > 0 ? "#f87171" : "#cbd5e1";
+    return (
+      <div style={{ ...cs, cursor:"default", flexDirection:"column", gap:3, justifyContent:"center", padding:"0 12px" }}>
+        {total > 0 ? (
+          <>
+            <div style={{ display:"flex", alignItems:"center", gap:6, width:"100%" }}>
+              <div style={{ flex:1, height:5, background:"#e2e8f0", borderRadius:3, overflow:"hidden" }}>
+                <div style={{ width:`${pct*100}%`, height:"100%", background:colour, borderRadius:3, transition:"width 0.4s" }} />
+              </div>
+              <span style={{ fontSize:12, fontWeight:700, color:colour, minWidth:32, textAlign:"right" }}>{total}pts</span>
+            </div>
+            {maxScore > 0 && <span style={{ fontSize:9, color:"#94a3b8" }}>of {maxScore} max</span>}
+          </>
+        ) : (
+          <span style={{ color:"#cbd5e1", fontSize:12 }}>—</span>
+        )}
+      </div>
+    );
+  }
   if (col.type==="select") return (
     <div style={cs}>
-      <select value={value||""} onChange={e=>onChange(e.target.value)}
-        style={{ ...inputStyle, cursor:"pointer", background:"transparent" }}>
+      <select value={value||""} onChange={e=>!readonly&&onChange(e.target.value)}
+        disabled={readonly}
+        style={{ ...inputStyle, cursor:readonly?"default":"pointer", background:"transparent", opacity:1 }}>
         <option value="">—</option>
         {col.options.map(o=><option key={o} value={o}>{o}</option>)}
       </select>
     </div>
   );
   if (col.type==="link") return (
-    <div style={{ ...cs, gap:6 }} onClick={onStartEdit}>
+    <div style={{ ...cs, gap:6 }} onClick={readonly?undefined:onStartEdit}>
       {editing
         ? <input ref={ref} value={local} onChange={e=>setLocal(e.target.value)} onBlur={()=>{onChange(local);onEndEdit();}} onKeyDown={kd} placeholder="Paste property URL" style={{ ...inputStyle, color:"#0ea5e9" }}/>
         : value
@@ -435,7 +548,7 @@ function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse
   if (col.type==="textarea") return (
     <div style={{ ...cs, alignItems:"flex-start", paddingTop:8, position:"relative", flexDirection:"column", gap:4,
       height: (isTimestamped && editing) ? "auto" : cs.height, minHeight: cs.height }}
-      onClick={onStartEdit}>
+      onClick={readonly?undefined:onStartEdit}>
       {editing ? (
         <textarea ref={ref} value={local} onChange={e=>setLocal(e.target.value)}
           onBlur={isTimestamped ? commitTimestamped : commit}
@@ -492,7 +605,7 @@ function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse
     </div>
   );
   return (
-    <div style={cs} onClick={onStartEdit}>
+    <div style={cs} onClick={readonly?undefined:onStartEdit}>
       {editing
         ? <input ref={ref} value={local} onChange={e=>setLocal(e.target.value)} onBlur={commit} onKeyDown={kd} style={inputStyle}/>
         : <span style={{ fontSize:13, color:value?"#374151":"#cbd5e1", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
@@ -572,6 +685,8 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
   const [pendingCount,   setPendingCount]   = useState(0);
   const [saveError,      setSaveError]      = useState("");
   const [streetProfiles, setStreetProfiles] = useState([]);
+  const [navOpen,        setNavOpen]        = useState(false);
+  const [amenitiesCfg,   setAmenitiesCfg]   = useState([]);
   const [purchaseCosts,  setPurchaseCosts]  = useState(null);
   const purchaseCostsRef = useRef(null);
 
@@ -587,6 +702,8 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
           ...row,
           ph_rating: Array.isArray(row.ph_rating) ? (row.ph_rating[0] || "") : (row.ph_rating || ""),
           calc_ph: row.calc_ph || "",
+          amenities: Array.isArray(row.amenities) ? row.amenities : [],
+          score_card: row.score_card || "",
         }));
         setRows(migrated);
         setNextId(Math.max(...migrated.map(x=>x.id),0)+1);
@@ -597,6 +714,7 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
     });
     loadPurchaseCosts().then(d => { if(d) { setPurchaseCosts(d); purchaseCostsRef.current = d; } });
     loadStreetProfiles().then(d => setStreetProfiles(d));
+    loadAmenities().then(d => setAmenitiesCfg(d));
     // Real-time listener for pending access requests
     const unsubPending = onPendingCountChange(count => setPendingCount(count));
     return () => unsubPending();
@@ -683,6 +801,21 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
     saveRows([...rows, row]);
   };
 
+  const recalcPH = () => {
+    const updated = rows.map(row => {
+      const addr = (row.address || "").toLowerCase();
+      if (!addr) return row;
+      const match = streetProfiles.find(sp => {
+        const streetName = (sp.street || "").toLowerCase().split(",")[0].trim();
+        return streetName && addr.includes(streetName);
+      });
+      const colours = match ? match.ph_profile : [];
+      const colourList = Array.isArray(colours) ? colours : (colours ? [colours] : []);
+      return { ...row, calc_ph: colourList.join(", ") };
+    });
+    saveRows(updated);
+  };
+
   const totalWidth = columns.reduce((s,c)=>s+c.width,0)+52;
 
   return (
@@ -694,92 +827,139 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
         .rh:hover td,.rh:hover>div{background:#f8fafc!important}
         .ch:hover .rc{opacity:1!important;pointer-events:all!important}
         select option{background:#fff;color:#1e293b}
+        /* ── Mobile ── */
+        .nav-links { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+        .nav-menu-btn { display:none; }
+        .nav-dropdown { display:none; }
+        .nav-dropdown.open { display:flex; flex-direction:column; gap:8px; }
+        .page-header { padding:20px 16px 16px; }
+        .page-title { font-size:24px !important; }
+        .actions-bar { gap:8px; }
+        .stat-cards { gap:10px; margin-top:14px; }
+        .stat-card { padding:10px 14px !important; }
+        .grid-wrap { padding:12px 8px 32px !important; }
+        @media(max-width:640px){
+          .nav-links { display:none; }
+          .nav-links.open { display:flex; flex-direction:column; align-items:flex-start; position:absolute; top:56px; left:0; right:0; background:#fff; border-bottom:1px solid #e2e8f0; padding:12px 16px; z-index:200; box-shadow:0 4px 12px rgba(0,0,0,0.08); gap:8px; }
+          .nav-menu-btn { display:flex !important; }
+          .user-chip span.name { display:none; }
+          .page-header { padding:16px 16px 12px !important; }
+          .page-title { font-size:22px !important; }
+          .actions-bar { width:100%; }
+          .actions-bar button { flex:1; min-width:0; font-size:12px !important; padding:8px 10px !important; }
+          .stat-cards { flex-direction:row; flex-wrap:wrap; }
+          .stat-card { flex:1; min-width:120px; }
+          .grid-wrap { padding:8px 0 24px !important; }
+          .grid-hint { display:none; }
+        }
       `}</style>
 
       <div style={{ minHeight:"100vh", background:"#f8fafc", fontFamily:"'Inter', sans-serif", color:"#1e293b" }}>
 
         {/* Navbar */}
-        <div style={{ background:"#fff", borderBottom:"1px solid #e2e8f0", padding:"12px 32px", display:"flex", alignItems:"center", justifyContent:"space-between", position:"sticky", top:0, zIndex:100, boxShadow:"0 1px 3px rgba(0,0,0,0.06)" }}>
-          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-            <div style={{ width:32, height:32, borderRadius:8, background:"linear-gradient(135deg,#0ea5e9,#0369a1)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:16 }}>&#127968;</div>
-            <span style={{ fontFamily:"'Playfair Display', serif", fontWeight:700, fontSize:18, color:"#0f172a" }}>PropTracker</span>
-            {saving && <span style={{ color:"#94a3b8", fontSize:11, marginLeft:4, background:"#f1f5f9", borderRadius:20, padding:"2px 10px" }}>Saving...</span>}
-            {saveError && <span style={{ color:"#dc2626", fontSize:11, marginLeft:4, background:"#fef2f2", border:"1px solid #fecaca", borderRadius:20, padding:"2px 10px" }}>⚠ {saveError}</span>}
-            <button onClick={()=>onNavigate && onNavigate("purchase-costs")}
-              style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:8, padding:"6px 14px", color:"#16a34a", cursor:"pointer", fontSize:13, fontWeight:500, marginLeft:8 }}>
-              &#128200; Purchase Costs
+        <div style={{ background:"#fff", borderBottom:"1px solid #e2e8f0", padding:"10px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", position:"sticky", top:0, zIndex:100, boxShadow:"0 1px 3px rgba(0,0,0,0.06)" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            {/* Hamburger — mobile only */}
+            <button className="nav-menu-btn" onClick={()=>setNavOpen(o=>!o)}
+              style={{ background:"none", border:"none", cursor:"pointer", fontSize:22, color:"#64748b", padding:"2px 4px", display:"none" }}>
+              ☰
             </button>
-            <button onClick={()=>onNavigate && onNavigate("suburb-profiles")}
-              style={{ background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:8, padding:"6px 14px", color:"#0369a1", cursor:"pointer", fontSize:13, fontWeight:500 }}>
-              &#127968; Suburb Profiles
+            <div style={{ width:30, height:30, borderRadius:8, background:"linear-gradient(135deg,#0ea5e9,#0369a1)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:15 }}>&#127968;</div>
+            <span style={{ fontFamily:"'Playfair Display', serif", fontWeight:700, fontSize:17, color:"#0f172a" }}>PropTracker</span>
+            {saving && <span style={{ color:"#94a3b8", fontSize:10, background:"#f1f5f9", borderRadius:20, padding:"2px 8px" }}>Saving…</span>}
+            {saveError && <span style={{ color:"#dc2626", fontSize:10, background:"#fef2f2", border:"1px solid #fecaca", borderRadius:20, padding:"2px 8px" }}>⚠ {saveError}</span>}
+          </div>
+          {/* Nav links — hidden on mobile, shown via hamburger */}
+          <div className={"nav-links" + (navOpen ? " open" : "")} style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <button onClick={()=>{ onNavigate&&onNavigate("purchase-costs"); setNavOpen(false); }}
+              style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:8, padding:"6px 12px", color:"#16a34a", cursor:"pointer", fontSize:12, fontWeight:500, whiteSpace:"nowrap" }}>
+              💰 Purchase Costs
             </button>
-            <button onClick={()=>onNavigate && onNavigate("street-profiles")}
-              style={{ background:"#fffbeb", border:"1px solid #fde68a", borderRadius:8, padding:"6px 14px", color:"#b45309", cursor:"pointer", fontSize:13, fontWeight:500 }}>
-              &#127968; Street PH Profiles
+            <button onClick={()=>{ onNavigate&&onNavigate("suburb-profiles"); setNavOpen(false); }}
+              style={{ background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:8, padding:"6px 12px", color:"#0369a1", cursor:"pointer", fontSize:12, fontWeight:500, whiteSpace:"nowrap" }}>
+              🏘 Suburb Profiles
+            </button>
+            <button onClick={()=>{ onNavigate&&onNavigate("street-profiles"); setNavOpen(false); }}
+              style={{ background:"#fffbeb", border:"1px solid #fde68a", borderRadius:8, padding:"6px 12px", color:"#b45309", cursor:"pointer", fontSize:12, fontWeight:500, whiteSpace:"nowrap" }}>
+              🏚 Street PH Profiles
+            </button>
+            <button onClick={()=>{ onNavigate&&onNavigate("amenities"); setNavOpen(false); }}
+              style={{ background:"#f5f3ff", border:"1px solid #ddd6fe", borderRadius:8, padding:"6px 12px", color:"#7c3aed", cursor:"pointer", fontSize:12, fontWeight:500, whiteSpace:"nowrap" }}>
+              ⭐ Amenities
             </button>
           </div>
-          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
             {isAdmin && (
               <button onClick={()=>setShowAdmin(true)}
-                style={{ background:"#f5f3ff", border:"1px solid #ddd6fe", borderRadius:8, padding:"7px 14px", color:"#7c3aed", cursor:"pointer", fontSize:13, fontWeight:600, display:"flex", alignItems:"center", gap:7, position:"relative" }}>
-                &#9881; Admin
+                style={{ background:"#f5f3ff", border:"1px solid #ddd6fe", borderRadius:8, padding:"6px 12px", color:"#7c3aed", cursor:"pointer", fontSize:12, fontWeight:600, display:"flex", alignItems:"center", gap:6, position:"relative" }}>
+                ⚙ Admin
                 {pendingCount > 0 && (
-                  <span style={{ background:"#ef4444", color:"#fff", borderRadius:"50%", width:18, height:18, fontSize:11, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1 }}>
+                  <span style={{ background:"#ef4444", color:"#fff", borderRadius:"50%", width:17, height:17, fontSize:10, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center" }}>
                     {pendingCount}
                   </span>
                 )}
               </button>
             )}
-            <div style={{ display:"flex", alignItems:"center", gap:8, background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:24, padding:"5px 14px 5px 6px" }}>
-              {user.photoURL && <img src={user.photoURL} alt="" style={{ width:26, height:26, borderRadius:"50%", objectFit:"cover" }}/>}
-              <span style={{ color:"#374151", fontSize:13, fontWeight:500 }}>{user.displayName||user.email}</span>
-              {isAdmin && <span style={{ background:"#7c3aed", borderRadius:10, padding:"2px 8px", fontSize:10, color:"#fff", fontWeight:700 }}>ADMIN</span>}
+            <div className="user-chip" style={{ display:"flex", alignItems:"center", gap:6, background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:24, padding:"4px 10px 4px 5px" }}>
+              {user.photoURL && <img src={user.photoURL} alt="" style={{ width:24, height:24, borderRadius:"50%", objectFit:"cover" }}/>}
+              <span className="name" style={{ color:"#374151", fontSize:12, fontWeight:500, maxWidth:120, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{user.displayName||user.email}</span>
+              {isAdmin && <span style={{ background:"#7c3aed", borderRadius:10, padding:"1px 7px", fontSize:10, color:"#fff", fontWeight:700 }}>ADMIN</span>}
             </div>
-            <button onClick={onSignOut} style={{ background:"transparent", border:"1px solid #e2e8f0", borderRadius:8, padding:"7px 14px", color:"#94a3b8", cursor:"pointer", fontSize:13 }}>
-              Sign Out
+            <button onClick={onSignOut} style={{ background:"transparent", border:"1px solid #e2e8f0", borderRadius:8, padding:"6px 10px", color:"#94a3b8", cursor:"pointer", fontSize:12 }}>
+              Out
             </button>
           </div>
         </div>
 
         {/* Page Header */}
-        <div style={{ padding:"32px 32px 24px", borderBottom:"1px solid #e2e8f0", background:"#fff" }}>
+        <div className="page-header" style={{ padding:"24px 20px 16px", borderBottom:"1px solid #e2e8f0", background:"#fff" }}>
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:16 }}>
             <div>
               <p style={{ margin:"0 0 4px", color:"#94a3b8", fontSize:12, fontWeight:600, letterSpacing:2, textTransform:"uppercase" }}>Portfolio Analysis</p>
-              <h1 style={{ margin:0, fontFamily:"'Playfair Display', serif", fontSize:32, fontWeight:700, color:"#0f172a", letterSpacing:-0.5 }}>
+              <h1 className="page-title" style={{ margin:0, fontFamily:"'Playfair Display', serif", fontSize:28, fontWeight:700, color:"#0f172a", letterSpacing:-0.5 }}>
                 Property Dashboard
               </h1>
             </div>
-            <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
-              {selectedRows.size>0 && (
+            <div className="actions-bar" style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
+              {isAdmin && selectedRows.size>0 && (
                 <button onClick={deleteRows}
                   style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:8, padding:"9px 16px", color:"#dc2626", cursor:"pointer", fontSize:13, fontWeight:500 }}>
                   Delete {selectedRows.size} selected
                 </button>
               )}
-              <button onClick={()=>setShowAddCol(true)}
-                style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:8, padding:"9px 16px", color:"#64748b", cursor:"pointer", fontSize:13, fontWeight:500 }}>
-                + Column
+              {isAdmin && (
+                <button onClick={()=>setShowAddCol(true)}
+                  style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:8, padding:"9px 16px", color:"#64748b", cursor:"pointer", fontSize:13, fontWeight:500 }}>
+                  + Column
+                </button>
+              )}
+              {isAdmin && (
+                <button onClick={addRow}
+                  style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:8, padding:"9px 16px", color:"#64748b", cursor:"pointer", fontSize:13, fontWeight:500 }}>
+                  + Empty Row
+                </button>
+              )}
+              <button onClick={recalcPH}
+                style={{ background:"#fffbeb", border:"1px solid #fde68a", borderRadius:8, padding:"9px 16px", color:"#b45309", cursor:"pointer", fontSize:13, fontWeight:600, display:"flex", alignItems:"center", gap:6 }}>
+                &#8635; PH Recalculate
               </button>
-              <button onClick={addRow}
-                style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:8, padding:"9px 16px", color:"#64748b", cursor:"pointer", fontSize:13, fontWeight:500 }}>
-                + Empty Row
-              </button>
-              <button onClick={()=>setShowQuickAdd(true)}
-                style={{ background:"#0ea5e9", border:"none", borderRadius:8, padding:"10px 20px", color:"#fff", cursor:"pointer", fontSize:13, fontWeight:600, boxShadow:"0 2px 8px rgba(14,165,233,0.35)", display:"flex", alignItems:"center", gap:6 }}>
-                &#10024; Add Property
-              </button>
+              {isAdmin && (
+                <button onClick={()=>setShowQuickAdd(true)}
+                  style={{ background:"#0ea5e9", border:"none", borderRadius:8, padding:"10px 20px", color:"#fff", cursor:"pointer", fontSize:13, fontWeight:600, boxShadow:"0 2px 8px rgba(14,165,233,0.35)", display:"flex", alignItems:"center", gap:6 }}>
+                  &#10024; Add Property
+                </button>
+              )}
             </div>
           </div>
 
           {/* Stats */}
-          <div style={{ display:"flex", gap:16, marginTop:20, flexWrap:"wrap" }}>
+          <div className="stat-cards" style={{ display:"flex", gap:12, marginTop:16, flexWrap:"wrap" }}>
             {[
               { label:"Total Properties", value:rows.length, color:"#0ea5e9" },
               { label:"Analysed",   value:rows.filter(r=>r.ph_rating).length, color:"#f59e0b" },
               { label:"PH Rated", value:rows.filter(r=>r.ph_rating).length, color:"#10b981" },
             ].map(s=>(
-              <div key={s.label} style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:10, padding:"12px 20px", display:"flex", alignItems:"center", gap:12 }}>
+              <div key={s.label} className="stat-card" style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:10, padding:"12px 16px", display:"flex", alignItems:"center", gap:10 }}>
                 <div style={{ width:4, height:36, borderRadius:2, background:s.color }}/>
                 <div>
                   <div style={{ color:"#94a3b8", fontSize:11, fontWeight:600, textTransform:"uppercase", letterSpacing:1 }}>{s.label}</div>
@@ -791,7 +971,7 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
         </div>
 
         {/* Grid */}
-        <div style={{ overflowX:"auto", padding:"24px 32px 40px" }}>
+        <div className="grid-wrap" style={{ overflowX:"auto", padding:"16px 12px 40px" }}>
           <div style={{ minWidth:totalWidth, background:"#fff", border:"1px solid #e2e8f0", borderRadius:12, overflow:"hidden", boxShadow:"0 1px 4px rgba(0,0,0,0.05)" }}>
 
             {/* Column Headers */}
@@ -819,43 +999,55 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
             {rows.map((row,idx)=>(
               <div key={row.id} className="rh"
                 style={{ display:"flex", background:idx%2===0?"#fff":"#fafbfc", borderBottom:"1px solid #f1f5f9" }}>
-                <div style={{ width:52, minWidth:52, display:"flex", alignItems:"center", justifyContent:"center", borderRight:"1px solid #e2e8f0", background:"inherit" }}>
-                  <input type="checkbox" style={{ accentColor:"#0ea5e9", cursor:"pointer", width:15, height:15 }}
-                    checked={selectedRows.has(row.id)}
-                    onChange={e=>{ const s=new Set(selectedRows); e.target.checked?s.add(row.id):s.delete(row.id); setSelectedRows(s); }}/>
-                </div>
+                {isAdmin && (
+                  <div style={{ width:52, minWidth:52, display:"flex", alignItems:"center", justifyContent:"center", borderRight:"1px solid #e2e8f0", background:"inherit" }}>
+                    <input type="checkbox" style={{ accentColor:"#0ea5e9", cursor:"pointer", width:15, height:15 }}
+                      checked={selectedRows.has(row.id)}
+                      onChange={e=>{ const s=new Set(selectedRows); e.target.checked?s.add(row.id):s.delete(row.id); setSelectedRows(s); }}/>
+                  </div>
+                )}
+                {!isAdmin && (
+                  <div style={{ width:52, minWidth:52, borderRight:"1px solid #e2e8f0", background:"inherit" }}/>
+                )}
                 {columns.map(col=>{
                   // For calc_ph, inject address + street profiles for live lookup
                   const enrichedCol = col.type==="calc_ph"
                     ? { ...col, _rowAddress: row.address||"", _streetProfiles: streetProfiles }
+                    : col.type==="amenities"
+                    ? { ...col, _amenitiesCfg: amenitiesCfg }
+                    : col.type==="score_card"
+                    ? { ...col, _amenitiesCfg: amenitiesCfg, _rowAmenities: Array.isArray(row.amenities)?row.amenities:[] }
                     : col;
                   return (
                     <Cell key={col.id} col={enrichedCol} value={row[col.id]}
                       onChange={v=>updateCell(row.id,col.id,v)}
                       editing={editing?.rowId===row.id&&editing?.colId===col.id}
-                      onStartEdit={()=>setEditing({rowId:row.id,colId:col.id})}
+                      onStartEdit={()=>{ if(isAdmin) setEditing({rowId:row.id,colId:col.id}); }}
                       onEndEdit={()=>setEditing(null)}
                       onAnalyse={null}
-                      analysing={false}/>
+                      analysing={false}
+                      readonly={!isAdmin}/>
                   );
                 })}
               </div>
             ))}
 
-            {/* Add Row footer */}
-            <div onClick={addRow}
-              style={{ display:"flex", height:44, cursor:"pointer", borderTop:"1px solid #f1f5f9", background:"#fafbfc" }}
-              onMouseEnter={e=>e.currentTarget.style.background="#f1f5f9"}
-              onMouseLeave={e=>e.currentTarget.style.background="#fafbfc"}>
-              <div style={{ width:52, minWidth:52, borderRight:"1px solid #e2e8f0", display:"flex", alignItems:"center", justifyContent:"center", color:"#94a3b8", fontSize:20 }}>+</div>
-              <div style={{ flex:1, display:"flex", alignItems:"center", padding:"0 12px", color:"#94a3b8", fontSize:13 }}>
-                Click to add a new row...
+            {/* Add Row footer — admin only */}
+            {isAdmin && (
+              <div onClick={addRow}
+                style={{ display:"flex", height:44, cursor:"pointer", borderTop:"1px solid #f1f5f9", background:"#fafbfc" }}
+                onMouseEnter={e=>e.currentTarget.style.background="#f1f5f9"}
+                onMouseLeave={e=>e.currentTarget.style.background="#fafbfc"}>
+                <div style={{ width:52, minWidth:52, borderRight:"1px solid #e2e8f0", display:"flex", alignItems:"center", justifyContent:"center", color:"#94a3b8", fontSize:20 }}>+</div>
+                <div style={{ flex:1, display:"flex", alignItems:"center", padding:"0 12px", color:"#94a3b8", fontSize:13 }}>
+                  Click to add a new row...
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
 
-        <div style={{ padding:"0 32px 32px", color:"#cbd5e1", fontSize:12 }}>
+        <div className="grid-hint" style={{ padding:"0 20px 24px", color:"#cbd5e1", fontSize:12 }}>
           Click any cell to edit &nbsp;&#183;&nbsp; Enter to confirm &nbsp;&#183;&nbsp; Esc to cancel &nbsp;&#183;&nbsp; Use "&#10024; Add Property" to auto-fill from a listing URL or text
         </div>
       </div>

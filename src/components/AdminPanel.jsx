@@ -1,24 +1,48 @@
-import { useState, useEffect, useCallback } from "react";
-import { getPendingRequests, getApprovedUsers, approveUser, denyRequest, revokeUser } from "../firebase.js";
+import { useState, useEffect } from "react";
+import { approveUser, denyRequest, revokeUser } from "../firebase.js";
+import { getFirestore, collection, onSnapshot } from "firebase/firestore";
+
+const db = getFirestore();
 
 export default function AdminPanel({ onClose }) {
   const [tab,      setTab]      = useState("pending");
   const [pending,  setPending]  = useState([]);
   const [approved, setApproved] = useState([]);
   const [loading,  setLoading]  = useState(true);
+  const [error,    setError]    = useState("");
 
-  const load = useCallback(async () => {
+  useEffect(() => {
     setLoading(true);
-    const [p, a] = await Promise.all([getPendingRequests(), getApprovedUsers()]);
-    setPending(p); setApproved(a);
-    setLoading(false);
+    setError("");
+
+    // Real-time listener on access_requests
+    const unsubReqs = onSnapshot(
+      collection(db, "access_requests"),
+      snap => {
+        const all = snap.docs.map(d => d.data());
+        setPending(all.filter(r => r.status === "pending"));
+        setLoading(false);
+      },
+      err => {
+        console.error("access_requests listener error:", err);
+        setError("Failed to load requests: " + (err.code || err.message));
+        setLoading(false);
+      }
+    );
+
+    // Real-time listener on approved_users
+    const unsubApproved = onSnapshot(
+      collection(db, "approved_users"),
+      snap => setApproved(snap.docs.map(d => d.data())),
+      err => console.error("approved_users listener error:", err)
+    );
+
+    return () => { unsubReqs(); unsubApproved(); };
   }, []);
 
-  useEffect(() => { load(); }, [load]);
-
-  const handleApprove = async (req) => { await approveUser(req); load(); };
-  const handleDeny    = async (req) => { await denyRequest(req.email); load(); };
-  const handleRevoke  = async (u)   => { await revokeUser(u.email); load(); };
+  const handleApprove = async (req) => { await approveUser(req); };
+  const handleDeny    = async (req) => { await denyRequest(req.email); };
+  const handleRevoke  = async (u)   => { await revokeUser(u.email); };
 
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.5)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000, backdropFilter:"blur(4px)" }}>
@@ -45,6 +69,11 @@ export default function AdminPanel({ onClose }) {
 
         {/* Content */}
         <div style={{ overflowY:"auto", flex:1, padding:24 }}>
+          {error && (
+            <div style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:8, padding:"10px 14px", marginBottom:16, color:"#dc2626", fontSize:13 }}>
+              ⚠ {error}
+            </div>
+          )}
           {loading ? (
             <div style={{ textAlign:"center", color:"#94a3b8", padding:40 }}>Loading...</div>
           ) : tab==="pending" ? (
@@ -59,7 +88,7 @@ export default function AdminPanel({ onClose }) {
                   <div style={{ flex:1, minWidth:0 }}>
                     <div style={{ color:"#0f172a", fontWeight:600, fontSize:14 }}>{req.name}</div>
                     <div style={{ color:"#64748b", fontSize:12 }}>{req.email}</div>
-                    <div style={{ color:"#94a3b8", fontSize:11, marginTop:2 }}>{new Date(req.requestedAt).toLocaleString()}</div>
+                    <div style={{ color:"#94a3b8", fontSize:11, marginTop:2 }}>{req.requestedAt ? new Date(req.requestedAt).toLocaleString() : ""}</div>
                   </div>
                   <div style={{ display:"flex", gap:8 }}>
                     <button onClick={()=>handleApprove(req)}
@@ -82,7 +111,7 @@ export default function AdminPanel({ onClose }) {
                   <div style={{ flex:1, minWidth:0 }}>
                     <div style={{ color:"#0f172a", fontWeight:600, fontSize:14 }}>{u.name}</div>
                     <div style={{ color:"#64748b", fontSize:12 }}>{u.email}</div>
-                    <div style={{ color:"#94a3b8", fontSize:11, marginTop:2 }}>Approved {new Date(u.approvedAt).toLocaleString()}</div>
+                    <div style={{ color:"#94a3b8", fontSize:11, marginTop:2 }}>Approved {u.approvedAt ? new Date(u.approvedAt).toLocaleString() : ""}</div>
                   </div>
                   <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                     <span style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:20, padding:"3px 12px", color:"#16a34a", fontSize:11, fontWeight:600 }}>Active</span>

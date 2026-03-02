@@ -155,7 +155,7 @@ export default function PurchaseCosts({ onBack }) {
           <span style={{ color:"#0f172a", fontSize:14, fontWeight:600 }}>Cost of Purchase</span>
         </div>
 
-        <div style={{ maxWidth:900, margin:"0 auto", padding:"32px 24px" }}>
+        <div style={{ maxWidth:900, margin:"0 auto", padding:"20px 16px" }}>
           <div style={{ marginBottom:28 }}>
             <h1 style={{ fontFamily:"'Playfair Display', serif", fontSize:28, fontWeight:700, color:"#0f172a", margin:"0 0 8px" }}>Cost of Purchase</h1>
             <p style={{ color:"#64748b", fontSize:14, margin:0, lineHeight:1.6 }}>

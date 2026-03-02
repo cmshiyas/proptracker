@@ -7,6 +7,7 @@ import PropertyTracker from "./components/PropertyTracker.jsx";
 import PurchaseCosts    from "./components/PurchaseCosts.jsx";
 import SuburbProfiles   from "./components/SuburbProfiles.jsx";
 import StreetProfiles   from "./components/StreetProfiles.jsx";
+import AmenitiesConfig  from "./components/AmenitiesConfig.jsx";
 
 const ADMIN_EMAIL = "cmshiyas007@gmail.com";
 
@@ -49,6 +50,7 @@ export default function App() {
   if (page === "purchase-costs")  return <PurchaseCosts   onBack={() => setPage("dashboard")} />;
   if (page === "suburb-profiles")  return <SuburbProfiles  onBack={() => setPage("dashboard")} isAdmin={user.email === ADMIN_EMAIL} />;
   if (page === "street-profiles")   return <StreetProfiles   onBack={() => setPage("dashboard")} isAdmin={user.email === ADMIN_EMAIL} />;
+  if (page === "amenities")          return <AmenitiesConfig  onBack={() => setPage("dashboard")} isAdmin={user.email === ADMIN_EMAIL} />;
 
   return (
     <PropertyTracker

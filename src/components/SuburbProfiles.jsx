@@ -199,7 +199,7 @@ export default function SuburbProfiles({ onBack, isAdmin }) {
       <div style={{ minHeight: "100vh", background: "#f8fafc", fontFamily: "'Inter',sans-serif" }}>
 
         {/* Navbar */}
-        <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "12px 32px", display: "flex", alignItems: "center", gap: 16, position: "sticky", top: 0, zIndex: 100, boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
+        <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "10px 16px", display: "flex", alignItems: "center", gap: 16, position: "sticky", top: 0, zIndex: 100, boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
           <button onClick={onBack} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 14px", color: "#64748b", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
             ← Dashboard
           </button>
@@ -212,12 +212,12 @@ export default function SuburbProfiles({ onBack, isAdmin }) {
           {saving && <span style={{ color: "#94a3b8", fontSize: 11, background: "#f1f5f9", borderRadius: 20, padding: "2px 10px" }}>Saving...</span>}
         </div>
 
-        <div style={{ maxWidth: 1100, margin: "0 auto", padding: "32px 24px" }}>
+        <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 16px" }}>
 
           {/* Header row */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28, flexWrap: "wrap", gap: 16 }}>
             <div>
-              <h1 style={{ fontFamily: "'Playfair Display',serif", fontSize: 28, fontWeight: 700, color: "#0f172a", margin: "0 0 6px" }}>Suburb Profiles</h1>
+              <h1 style={{ fontFamily: "'Playfair Display',serif", fontSize: "clamp(20px,5vw,28px)", fontWeight: 700, color: "#0f172a", margin: "0 0 6px" }}>Suburb Profiles</h1>
               <p style={{ color: "#64748b", fontSize: 14, margin: 0 }}>
                 {profiles.length} suburb{profiles.length !== 1 ? "s" : ""} across {Object.keys(grouped).length} state{Object.keys(grouped).length !== 1 ? "s" : ""}. Hover any card to read the full profile.
               </p>

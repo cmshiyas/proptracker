@@ -126,3 +126,12 @@ export async function loadStreetProfiles() {
 export async function saveStreetProfiles(entries) {
   await setDoc(sharedDoc("street_profiles"), { entries });
 }
+
+// ── Amenities Config (shared, admin-only write) ────────────────────────────────
+export async function loadAmenities() {
+  const snap = await getDoc(sharedDoc("amenities_config"));
+  return snap.exists() ? snap.data().items || [] : [];
+}
+export async function saveAmenities(items) {
+  await setDoc(sharedDoc("amenities_config"), { items });
+}
