@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import { loadTrackerData, saveTrackerRows, saveTrackerCols, loadUserTrackerData, saveUserTrackerRows, saveUserTrackerCols, loadPurchaseCosts, onPendingCountChange, loadStreetProfiles, loadAmenities, DEFAULT_AMENITIES, loadUserAmenitiesSelections, saveUserAmenitiesSelections, loadUserAmenitiesConfig } from "../firebase.js";
+import { loadTrackerData, saveTrackerRows, saveTrackerCols, loadUserTrackerData, saveUserTrackerRows, saveUserTrackerCols, clearUserDashboard, loadPurchaseCosts, onPendingCountChange, loadStreetProfiles, loadAmenities, DEFAULT_AMENITIES, loadUserAmenitiesSelections, saveUserAmenitiesSelections, loadUserAmenitiesConfig } from "../firebase.js";
 import { calcStampDuty, formatCurrency } from "../stampDuty.js";
 import AdminPanel from "./AdminPanel.jsx";
 
 const MANDATORY_COLUMNS = [
+  { id:"status",      label:"Status",      type:"status_tag", width:170, locked:true },
   { id:"property",    label:"Property",    type:"link",     width:220, locked:true },
   { id:"address",     label:"Address",     type:"text",     width:200, locked:true },
   { id:"price",       label:"Price",       type:"currency", width:150, locked:true },
@@ -24,9 +25,12 @@ const MANDATORY_COLUMNS = [
   { id:"score_card",       label:"Score Card",         type:"score_card", width:140, locked:true },
 ];
 
+// Columns that support sort (numeric/currency/percent)
+const SORTABLE_COLS = new Set(["price","offer_price","rental_appraisal","cost_of_purchase","yield","land","score_card"]);
+
 const INITIAL_ROWS = [
-  { id:1, address:"", property:"", price:"", config:"", land:"", ph_rating:"", calc_ph:"", suburb:"", state:"", type:"", offer_price:"", rental_appraisal:"", cost_of_purchase:"", yield:"", comments:"", agent_notes:"", amenities:[], score_card:"" },
-  { id:2, address:"", property:"", price:"", config:"", land:"", ph_rating:"", calc_ph:"", suburb:"", state:"", type:"", offer_price:"", rental_appraisal:"", cost_of_purchase:"", yield:"", comments:"", agent_notes:"", amenities:[], score_card:"" },
+  { id:1, status:"Under Consideration", address:"", property:"", price:"", config:"", land:"", ph_rating:"", calc_ph:"", suburb:"", state:"", type:"", offer_price:"", rental_appraisal:"", cost_of_purchase:"", yield:"", comments:"", agent_notes:"", amenities:[], score_card:"" },
+  { id:2, status:"Under Consideration", address:"", property:"", price:"", config:"", land:"", ph_rating:"", calc_ph:"", suburb:"", state:"", type:"", offer_price:"", rental_appraisal:"", cost_of_purchase:"", yield:"", comments:"", agent_notes:"", amenities:[], score_card:"" },
 ];
 
 // ── AI Property Extractor (via Firebase Cloud Function proxy) ─────────────────
@@ -279,8 +283,10 @@ function PhTag({ colour }) {
 }
 
 // ── Cell ───────────────────────────────────────────────────────────────────────
-function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse, analysing, readonly }) {
-  const [local,    setLocal]    = useState(value||"");
+function Cell({ col, value: rawValue, onChange, editing, onStartEdit, onEndEdit, onAnalyse, analysing, readonly }) {
+  // Coerce value — arrays/numbers/null must never reach string renderers
+  const value = (rawValue === null || rawValue === undefined || Array.isArray(rawValue)) ? "" : rawValue;
+  const [local,    setLocal]    = useState(String(value));
   const [hovering, setHovering] = useState(false);
   const ref       = useRef();
   const anchorRef = useRef();
@@ -288,16 +294,16 @@ function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse
     if (col.id==="comments" || col.id==="agent_notes") {
       // When editing starts: show full history so user can see & append
       // When editing ends: clear so next open is fresh
-      if (editing) setLocal(value||"");
+      if (editing) setLocal(String(value));
       else setLocal("");
     } else {
-      setLocal(value||"");
+      setLocal(String(value));
     }
   },[value, editing]);
   useEffect(()=>{ if(editing&&ref.current) ref.current.focus(); },[editing]);
 
   const commit = ()=>{ onChange(local); onEndEdit(); };
-  const kd = e=>{ if(e.key==="Enter"&&col.type!=="textarea") commit(); if(e.key==="Escape"){setLocal(value||"");onEndEdit();} };
+  const kd = e=>{ if(e.key==="Enter"&&col.type!=="textarea") commit(); if(e.key==="Escape"){setLocal(String(value));onEndEdit();} };
 
   const cs = {
     width:col.width, minWidth:col.width, maxWidth:col.width,
@@ -321,6 +327,23 @@ function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse
     </div>
   );
   if (col.type==="rating") return <div style={{ ...cs, cursor:"default" }}><StarRating value={value} onChange={onChange}/></div>;
+  if (col.type==="status_tag") {
+    const isConsidering = !value || value === "Under Consideration";
+    const next = isConsidering ? "Analysed & Passed" : "Under Consideration";
+    const styles = isConsidering
+      ? { bg:"#eff6ff", border:"#bfdbfe", text:"#1d4ed8", dot:"#3b82f6", label:"Under Consideration" }
+      : { bg:"#f0fdf4", border:"#bbf7d0", text:"#15803d", dot:"#22c55e", label:"Analysed & Passed"  };
+    return (
+      <div style={{ ...cs, cursor:"pointer", padding:"0 10px" }}
+        onClick={() => onChange(next)}
+        title={`Click to mark as "${next}"`}>
+        <div style={{ display:"flex", alignItems:"center", gap:7, background:styles.bg, border:`1px solid ${styles.border}`, borderRadius:20, padding:"4px 11px", width:"100%", boxSizing:"border-box" }}>
+          <div style={{ width:7, height:7, borderRadius:"50%", background:styles.dot, flexShrink:0 }}/>
+          <span style={{ fontSize:11, fontWeight:700, color:styles.text, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{styles.label}</span>
+        </div>
+      </div>
+    );
+  }
   if (col.type==="ph_tag") {
     const s = value ? PH_COLOUR_STYLES[value] : null;
     const cellBg = s ? s.cell : "transparent";
@@ -403,13 +426,18 @@ function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse
     };
 
     const toggle = async (name) => {
+      if (!uid) return; // guard: no uid means user not ready yet
       const next = selected.includes(name)
         ? selected.filter(s => s !== name)
         : [...selected, name];
       // optimistic update via onChange (updates parent userAmenSel state)
       onChange(next);
       // persist to user's own Firestore path
-      await saveUserAmenitiesSelections(uid, { ...col._allSel, [rowId]: next });
+      try {
+        await saveUserAmenitiesSelections(uid, { ...(col._allSel || {}), [rowId]: next });
+      } catch(e) {
+        console.error("saveUserAmenitiesSelections error:", e);
+      }
     };
 
     return (
@@ -501,7 +529,7 @@ function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse
         : value
           ? <a href={value} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()}
               style={{ color:"#0ea5e9", fontSize:13, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", textDecoration:"none" }}>
-              {value.replace(/^https?:\/\//,"").substring(0,30)}...
+              {String(value).replace(/^https?:\/\//,"").substring(0,30)}...
             </a>
           : <span style={{ color:"#cbd5e1", fontSize:13 }}>Paste URL</span>}
     </div>
@@ -533,7 +561,7 @@ function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse
         const now = new Date();
         const ts = `${String(now.getDate()).padStart(2,"0")}/${String(now.getMonth()+1).padStart(2,"0")}/${String(now.getFullYear()).slice(-2)} ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
         const newEntry = ts + ":\n" + text;
-        const prev = value ? value.replace(/\s+$/, "") : "";
+        const prev = value ? String(value).replace(/\s+$/, "") : "";
         onChange(prev ? newEntry + "\n---\n" + prev : newEntry);
       }
     }
@@ -559,7 +587,7 @@ function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse
       {editing ? (
         <textarea ref={ref} value={local} onChange={e=>setLocal(e.target.value)}
           onBlur={isTimestamped ? commitTimestamped : commit}
-          onKeyDown={e=>{ if(e.key==="Escape"){setLocal(value||"");onEndEdit();} }}
+          onKeyDown={e=>{ if(e.key==="Escape"){setLocal(String(value));onEndEdit();} }}
           placeholder={isTimestamped ? "Edit or append above existing notes..." : ""}
           style={{ ...inputStyle, height: isTimestamped ? 120 : 54, resize:"vertical", lineHeight:1.5, fontSize:12 }}/>
       ) : isTimestamped ? (
@@ -607,7 +635,7 @@ function Cell({ col, value, onChange, editing, onStartEdit, onEndEdit, onAnalyse
             onBlur={commit} onKeyDown={kd} placeholder="$0"
             style={{ ...inputStyle, color:"#16a34a", fontWeight:600 }}/>
         : <span style={{ color:value?"#16a34a":"#cbd5e1", fontSize:13, fontWeight:600 }}>
-            {value ? (isNaN(value.replace(/[,$]/g,"")) ? value : `$${Number(value.replace(/[,$]/g,"")).toLocaleString()}`) : "—"}
+            {value ? (()=>{ const s=String(value); return isNaN(s.replace(/[,$]/g,"")) ? s : `$${Number(s.replace(/[,$]/g,"")).toLocaleString()}`; })() : "—"}
           </span>}
     </div>
   );
@@ -691,6 +719,12 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
   const [analysingRows,  setAnalysingRows]  = useState(new Set());
   const [pendingCount,   setPendingCount]   = useState(0);
   const [saveError,      setSaveError]      = useState("");
+  const [dupAlert,       setDupAlert]       = useState("");
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [dragColId,      setDragColId]      = useState(null); // column being dragged
+  const [dragOverColId,  setDragOverColId]  = useState(null); // column being hovered over
+  const [sortCol,        setSortCol]        = useState(null);  // column id to sort by
+  const [sortDir,        setSortDir]        = useState("desc"); // "asc" | "desc"
   const [streetProfiles, setStreetProfiles] = useState([]);
   const [navOpen,        setNavOpen]        = useState(false);
   const [amenitiesCfg,   setAmenitiesCfg]   = useState([]);
@@ -718,6 +752,7 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
           address: "",
           ...row,
           ph_rating: Array.isArray(row.ph_rating) ? (row.ph_rating[0] || "") : (row.ph_rating || ""),
+          status: row.status || "Under Consideration",
           calc_ph: row.calc_ph || "",
           score_card: row.score_card || "",
         }));
@@ -754,6 +789,13 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
     catch(e) { console.error("saveCols error:",e); setSaveError("Save failed: " + (e.code || e.message)); }
   },[user.uid]);
   const updateCell = (rowId, colId, v) => {
+    // Duplicate address guard
+    if (colId === "address" && v && v.trim()) {
+      if (isDupAddress(v.trim(), rowId)) {
+        showDupAlert(v.trim());
+        return; // reject the update
+      }
+    }
     setRows(prev => {
       const updated = prev.map(r => {
         if (r.id !== rowId) return r;
@@ -770,10 +812,81 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
       return updated;
     });
   };
-  const addRow       = () => { const row={id:nextId,...Object.fromEntries(columns.map(c=>[c.id,""]))}; setNextId(n=>n+1); saveRows([...rows,row]); };
+  const addRow       = () => { const row={id:nextId, status:"Under Consideration", amenities:[], score_card:"", ...Object.fromEntries(columns.map(c=>[c.id,""]))}; setNextId(n=>n+1); saveRows([...rows,row]); };
   const deleteRows   = () => { saveRows(rows.filter(r=>!selectedRows.has(r.id))); setSelectedRows(new Set()); };
   const addColumn    = col => { saveCols([...columns,col]); saveRows(rows.map(r=>({...r,[col.id]:""})));};
+
+  const handleResetDashboard = async () => {
+    setSaving(true);
+    await clearUserDashboard(user.uid);
+    setRows(INITIAL_ROWS);
+    setColumns(MANDATORY_COLUMNS);
+    setNextId(INITIAL_ROWS.length + 1);
+    setSelectedRows(new Set());
+    setSaving(false);
+    setShowResetConfirm(false);
+  };
+
+  const isDupAddress = (address, excludeRowId = null) => {
+    if (!address || !address.trim()) return false;
+    const norm = address.trim().toLowerCase();
+    return rows.some(r => r.id !== excludeRowId && (r.address||"").trim().toLowerCase() === norm);
+  };
+  const showDupAlert = (address) => {
+    setDupAlert(`Duplicate entry — "${address}" already exists in your list.`);
+    setTimeout(() => setDupAlert(""), 5000);
+  };
   const removeColumn = id  => saveCols(columns.filter(c=>c.id!==id));
+
+  const handleColDragStart = (e, colId) => {
+    setDragColId(colId);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", colId);
+  };
+  const handleColDragOver = (e, colId) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (colId !== dragColId) setDragOverColId(colId);
+  };
+  const handleColDrop = (e, targetColId) => {
+    e.preventDefault();
+    if (!dragColId || dragColId === targetColId) { setDragColId(null); setDragOverColId(null); return; }
+    const from = columns.findIndex(c => c.id === dragColId);
+    const to   = columns.findIndex(c => c.id === targetColId);
+    if (from === -1 || to === -1) return;
+    const reordered = [...columns];
+    const [moved] = reordered.splice(from, 1);
+    reordered.splice(to, 0, moved);
+    saveCols(reordered);
+    setDragColId(null);
+    setDragOverColId(null);
+  };
+  const handleColDragEnd = () => { setDragColId(null); setDragOverColId(null); };
+
+  const handleColSort = (colId) => {
+    if (!SORTABLE_COLS.has(colId)) return;
+    if (sortCol === colId) {
+      setSortDir(d => d === "desc" ? "asc" : "desc");
+    } else {
+      setSortCol(colId);
+      setSortDir("desc");
+    }
+  };
+
+  // Parse numeric value from any cell (handles $, %, "days", commas)
+  const parseNum = (v) => {
+    if (v === null || v === undefined || v === "") return -Infinity;
+    const n = parseFloat(String(v).replace(/[^0-9.\-]/g, ""));
+    return isNaN(n) ? -Infinity : n;
+  };
+
+  const sortRows = (rowSet) => {
+    if (!sortCol) return rowSet;
+    return [...rowSet].sort((a, b) => {
+      const av = parseNum(a[sortCol]), bv = parseNum(b[sortCol]);
+      return sortDir === "desc" ? bv - av : av - bv;
+    });
+  };
 
   const analyseSuburb = async (rowId) => {
     const row = rows.find(r => r.id === rowId);
@@ -800,6 +913,13 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
   };
 
   const quickAddProperty = (parsed) => {
+    // Duplicate address guard
+    if (parsed.address && parsed.address.trim()) {
+      if (isDupAddress(parsed.address.trim())) {
+        showDupAlert(parsed.address.trim());
+        return;
+      }
+    }
     // Auto-match PH rating from street profiles by checking if address contains a known street
     const addr = (parsed.address || "").toLowerCase();
     const matchedStreet = streetProfiles.find(sp =>
@@ -807,6 +927,9 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
     );
     const row = {
       id: nextId,
+      status:      "Under Consideration",
+      amenities:   [],
+      score_card:  "",
       ...Object.fromEntries(columns.map(c=>[c.id,""])),
       property:    parsed.property  || "",
       address:     parsed.address   || "",
@@ -890,6 +1013,7 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
             <span style={{ fontFamily:"'Playfair Display', serif", fontWeight:700, fontSize:17, color:"#0f172a" }}>Property Analysis</span>
             {saving && <span style={{ color:"#94a3b8", fontSize:10, background:"#f1f5f9", borderRadius:20, padding:"2px 8px" }}>Saving…</span>}
             {saveError && <span style={{ color:"#dc2626", fontSize:10, background:"#fef2f2", border:"1px solid #fecaca", borderRadius:20, padding:"2px 8px" }}>⚠ {saveError}</span>}
+            {dupAlert  && <span style={{ color:"#b45309", fontSize:10, background:"#fffbeb", border:"1px solid #fde68a", borderRadius:20, padding:"2px 10px", fontWeight:600 }}>⚠ {dupAlert}</span>}
           </div>
           {/* Nav links — hidden on mobile, shown via hamburger */}
           <div className={"nav-links" + (navOpen ? " open" : "")} style={{ display:"flex", alignItems:"center", gap:8 }}>
@@ -965,6 +1089,10 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
                 style={{ background:"#fffbeb", border:"1px solid #fde68a", borderRadius:8, padding:"9px 16px", color:"#b45309", cursor:"pointer", fontSize:13, fontWeight:600, display:"flex", alignItems:"center", gap:6 }}>
                 &#8635; PH Recalculate
               </button>
+              <button onClick={()=>setShowResetConfirm(true)}
+                style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:8, padding:"9px 16px", color:"#dc2626", cursor:"pointer", fontSize:13, fontWeight:600, display:"flex", alignItems:"center", gap:6 }}>
+                🗑 Reset Data
+              </button>
               <button onClick={()=>setShowQuickAdd(true)}
                 style={{ background:"#0ea5e9", border:"none", borderRadius:8, padding:"10px 20px", color:"#fff", cursor:"pointer", fontSize:13, fontWeight:600, boxShadow:"0 2px 8px rgba(14,165,233,0.35)", display:"flex", alignItems:"center", gap:6 }}>
                 &#10024; Add Property
@@ -975,9 +1103,9 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
           {/* Stats */}
           <div className="stat-cards" style={{ display:"flex", gap:12, marginTop:16, flexWrap:"wrap" }}>
             {[
-              { label:"Total Properties", value:rows.length, color:"#0ea5e9" },
-              { label:"Analysed",   value:rows.filter(r=>r.ph_rating).length, color:"#f59e0b" },
-              { label:"PH Rated", value:rows.filter(r=>r.ph_rating).length, color:"#10b981" },
+              { label:"Total Properties",     value:rows.length,                                                      color:"#0ea5e9" },
+              { label:"Under Consideration",  value:rows.filter(r=>!r.status||r.status==="Under Consideration").length, color:"#3b82f6" },
+              { label:"Analysed & Passed",    value:rows.filter(r=>r.status==="Analysed & Passed").length,             color:"#22c55e" },
             ].map(s=>(
               <div key={s.label} className="stat-card" style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:10, padding:"12px 16px", display:"flex", alignItems:"center", gap:10 }}>
                 <div style={{ width:4, height:36, borderRadius:2, background:s.color }}/>
@@ -991,89 +1119,180 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
         </div>
 
         {/* Grid */}
-        <div className="grid-wrap" style={{ overflowX:"auto", padding:"16px 12px 40px" }}>
-          <div style={{ minWidth:totalWidth, background:"#fff", border:"1px solid #e2e8f0", borderRadius:12, overflow:"hidden", boxShadow:"0 1px 4px rgba(0,0,0,0.05)" }}>
+        {(()=>{
+          // Helper: render a set of rows
+          const renderRows = (rowSet) => rowSet.map((row,idx)=>(
+            <div key={row.id} className="rh"
+              style={{ display:"flex", background:idx%2===0?"#fff":"#fafbfc", borderBottom:"1px solid #f1f5f9" }}>
+              <div style={{ width:52, minWidth:52, display:"flex", alignItems:"center", justifyContent:"center", borderRight:"1px solid #e2e8f0", background:"inherit" }}>
+                <input type="checkbox" style={{ accentColor:"#0ea5e9", cursor:"pointer", width:15, height:15 }}
+                  checked={selectedRows.has(row.id)}
+                  onChange={e=>{ const s=new Set(selectedRows); e.target.checked?s.add(row.id):s.delete(row.id); setSelectedRows(s); }}/>
+              </div>
+              {columns.map(col=>{
+                const userSelForRow = userAmenSel[String(row.id)] || [];
+                const enrichedCol = col.type==="calc_ph"
+                  ? { ...col, _rowAddress: row.address||"", _streetProfiles: streetProfiles }
+                  : col.type==="amenities"
+                  ? { ...col, _amenitiesCfg: amenitiesCfg, _rowId: row.id, _userSel: userSelForRow, _uid: user.uid, _allSel: userAmenSel }
+                  : col.type==="score_card"
+                  ? { ...col, _amenitiesCfg: amenitiesCfg, _rowAmenities: userSelForRow }
+                  : col;
+                const handleCellChange = col.type==="amenities"
+                  ? (next) => setUserAmenSel(prev => ({ ...prev, [String(row.id)]: next }))
+                  : col.type==="score_card"
+                  ? () => {}
+                  : (v) => updateCell(row.id, col.id, v);
+                return (
+                  <Cell key={col.id} col={enrichedCol} value={row[col.id]}
+                    onChange={handleCellChange}
+                    editing={editing?.rowId===row.id&&editing?.colId===col.id}
+                    onStartEdit={()=>setEditing({rowId:row.id,colId:col.id})}
+                    onEndEdit={()=>setEditing(null)}
+                    onAnalyse={null} analysing={false} readonly={false}/>
+                );
+              })}
+            </div>
+          ));
 
-            {/* Column Headers */}
+          // Helper: render column headers (called as fn so no duplicate React key issue)
+          const ColHeaders = ({sectionKey}) => (
             <div style={{ display:"flex", background:"#f8fafc", borderBottom:"2px solid #e2e8f0" }}>
               <div style={{ width:52, minWidth:52, display:"flex", alignItems:"center", justifyContent:"center", borderRight:"1px solid #e2e8f0", padding:"12px 0" }}>
                 <input type="checkbox" style={{ accentColor:"#0ea5e9", cursor:"pointer", width:15, height:15 }}
                   checked={selectedRows.size===rows.length&&rows.length>0}
                   onChange={e=>setSelectedRows(e.target.checked?new Set(rows.map(r=>r.id)):new Set())}/>
               </div>
-              {columns.map(col=>(
-                <div key={col.id} className="ch"
-                  style={{ width:col.width, minWidth:col.width, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px 12px", borderRight:"1px solid #e2e8f0" }}>
-                  <span style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1.2 }}>{col.label}</span>
-                  {!col.locked && (
-                    <button className="rc" onClick={()=>removeColumn(col.id)}
-                      style={{ opacity:0, pointerEvents:"none", background:"#fef2f2", border:"none", borderRadius:4, width:18, height:18, color:"#dc2626", cursor:"pointer", fontSize:11, display:"flex", alignItems:"center", justifyContent:"center", transition:"opacity 0.15s" }}>
-                      &#10005;
-                    </button>
-                  )}
-                </div>
-              ))}
+              {columns.map(col=>{
+                const isDragging = dragColId === col.id;
+                const isOver     = dragOverColId === col.id && dragColId !== col.id;
+                return (
+                  <div key={col.id} className="ch"
+                    draggable
+                    onDragStart={e => handleColDragStart(e, col.id)}
+                    onDragOver={e  => handleColDragOver(e, col.id)}
+                    onDrop={e      => handleColDrop(e, col.id)}
+                    onDragEnd={handleColDragEnd}
+                    style={{
+                      width:col.width, minWidth:col.width,
+                      display:"flex", alignItems:"center", justifyContent:"space-between",
+                      padding:"12px 12px", borderRight:"1px solid #e2e8f0",
+                      cursor:"grab",
+                      opacity: isDragging ? 0.4 : 1,
+                      background: isOver ? "#e0f2fe" : "transparent",
+                      borderLeft: isOver ? "2px solid #0ea5e9" : "2px solid transparent",
+                      transition:"background 0.1s, border-color 0.1s",
+                      userSelect:"none",
+                    }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:6, flex:1, minWidth:0 }}
+                      onClick={e=>{ e.stopPropagation(); handleColSort(col.id); }}>
+                      <span style={{ color:"#c7d2dd", fontSize:12, flexShrink:0, lineHeight:1 }}>⠿</span>
+                      <span style={{ color: sortCol===col.id ? "#0ea5e9" : "#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1.2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{col.label}</span>
+                      {SORTABLE_COLS.has(col.id) && (
+                        <span style={{ fontSize:9, color: sortCol===col.id ? "#0ea5e9" : "#cbd5e1", flexShrink:0 }}>
+                          {sortCol===col.id ? (sortDir==="desc" ? "▼" : "▲") : "⇅"}
+                        </span>
+                      )}
+                    </div>
+                    {!col.locked && (
+                      <button className="rc" onClick={e=>{ e.stopPropagation(); removeColumn(col.id); }}
+                        style={{ opacity:0, pointerEvents:"none", background:"#fef2f2", border:"none", borderRadius:4, width:18, height:18, color:"#dc2626", cursor:"pointer", fontSize:11, display:"flex", alignItems:"center", justifyContent:"center", transition:"opacity 0.15s", flexShrink:0 }}>
+                        &#10005;
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
+          );
 
-            {/* Data Rows */}
-            {rows.map((row,idx)=>(
-              <div key={row.id} className="rh"
-                style={{ display:"flex", background:idx%2===0?"#fff":"#fafbfc", borderBottom:"1px solid #f1f5f9" }}>
-                <div style={{ width:52, minWidth:52, display:"flex", alignItems:"center", justifyContent:"center", borderRight:"1px solid #e2e8f0", background:"inherit" }}>
-                  <input type="checkbox" style={{ accentColor:"#0ea5e9", cursor:"pointer", width:15, height:15 }}
-                    checked={selectedRows.has(row.id)}
-                    onChange={e=>{ const s=new Set(selectedRows); e.target.checked?s.add(row.id):s.delete(row.id); setSelectedRows(s); }}/>
-                </div>
-                {columns.map(col=>{
-                  // For calc_ph, inject address + street profiles for live lookup
-                  const userSelForRow = userAmenSel[String(row.id)] || [];
-                  const enrichedCol = col.type==="calc_ph"
-                    ? { ...col, _rowAddress: row.address||"", _streetProfiles: streetProfiles }
-                    : col.type==="amenities"
-                    ? { ...col, _amenitiesCfg: amenitiesCfg, _rowId: row.id, _userSel: userSelForRow, _uid: user.uid, _allSel: userAmenSel }
-                    : col.type==="score_card"
-                    ? { ...col, _amenitiesCfg: amenitiesCfg, _rowAmenities: userSelForRow }
-                    : col;
-                  const handleCellChange = col.type==="amenities"
-                    ? (next) => setUserAmenSel(prev => ({ ...prev, [String(row.id)]: next }))
-                    : col.type==="score_card"
-                    ? () => {}  // score_card is computed, no direct edit
-                    : (v) => updateCell(row.id, col.id, v);
-                  return (
-                    <Cell key={col.id} col={enrichedCol} value={row[col.id]}
-                      onChange={handleCellChange}
-                      editing={editing?.rowId===row.id&&editing?.colId===col.id}
-                      onStartEdit={()=>setEditing({rowId:row.id,colId:col.id})}
-                      onEndEdit={()=>setEditing(null)}
-                      onAnalyse={null}
-                      analysing={false}
-                      readonly={false}/>
-                  );
-                })}
-              </div>
-            ))}
-
-            {/* Add Row footer — admin only */}
+          const addRowFooter = (
             <div onClick={addRow}
-                style={{ display:"flex", height:44, cursor:"pointer", borderTop:"1px solid #f1f5f9", background:"#fafbfc" }}
-                onMouseEnter={e=>e.currentTarget.style.background="#f1f5f9"}
-                onMouseLeave={e=>e.currentTarget.style.background="#fafbfc"}>
-                <div style={{ width:52, minWidth:52, borderRight:"1px solid #e2e8f0", display:"flex", alignItems:"center", justifyContent:"center", color:"#94a3b8", fontSize:20 }}>+</div>
-                <div style={{ flex:1, display:"flex", alignItems:"center", padding:"0 12px", color:"#94a3b8", fontSize:13 }}>
-                  Click to add a new row...
+              style={{ display:"flex", height:44, cursor:"pointer", borderTop:"1px solid #f1f5f9", background:"#fafbfc" }}
+              onMouseEnter={e=>e.currentTarget.style.background="#f1f5f9"}
+              onMouseLeave={e=>e.currentTarget.style.background="#fafbfc"}>
+              <div style={{ width:52, minWidth:52, borderRight:"1px solid #e2e8f0", display:"flex", alignItems:"center", justifyContent:"center", color:"#94a3b8", fontSize:20 }}>+</div>
+              <div style={{ flex:1, display:"flex", alignItems:"center", padding:"0 12px", color:"#94a3b8", fontSize:13 }}>Click to add a new row...</div>
+            </div>
+          );
+
+          const considering = sortRows(rows.filter(r => !r.status || r.status === "Under Consideration"));
+          const passed      = sortRows(rows.filter(r => r.status === "Analysed & Passed"));
+
+          return (
+            <div className="grid-wrap" style={{ overflowX:"auto", padding:"16px 12px 40px" }}>
+              <div style={{ minWidth:totalWidth }}>
+
+                {/* ── Under Consideration ── */}
+                <div style={{ marginBottom:24 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:10, padding:"0 4px 10px" }}>
+                    <div style={{ width:10, height:10, borderRadius:"50%", background:"#3b82f6", flexShrink:0 }}/>
+                    <span style={{ fontSize:13, fontWeight:700, color:"#1d4ed8", textTransform:"uppercase", letterSpacing:1 }}>Under Consideration</span>
+                    <span style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:20, padding:"1px 10px", fontSize:11, fontWeight:700, color:"#1d4ed8" }}>{considering.length}</span>
+                  </div>
+                  <div style={{ background:"#fff", border:"1px solid #bfdbfe", borderRadius:12, overflow:"hidden", boxShadow:"0 1px 4px rgba(59,130,246,0.08)" }}>
+                    <ColHeaders sectionKey="considering" />
+                    {considering.length === 0
+                      ? <div style={{ padding:"28px 20px", textAlign:"center", color:"#94a3b8", fontSize:13 }}>No properties under consideration — add one above.</div>
+                      : renderRows(considering)
+                    }
+                    {addRowFooter}
+                  </div>
                 </div>
+
+                {/* ── Analysed & Passed ── */}
+                <div>
+                  <div style={{ display:"flex", alignItems:"center", gap:10, padding:"0 4px 10px" }}>
+                    <div style={{ width:10, height:10, borderRadius:"50%", background:"#22c55e", flexShrink:0 }}/>
+                    <span style={{ fontSize:13, fontWeight:700, color:"#15803d", textTransform:"uppercase", letterSpacing:1 }}>Analysed & Passed</span>
+                    <span style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:20, padding:"1px 10px", fontSize:11, fontWeight:700, color:"#15803d" }}>{passed.length}</span>
+                  </div>
+                  <div style={{ background:"#fff", border:"1px solid #bbf7d0", borderRadius:12, overflow:"hidden", boxShadow:"0 1px 4px rgba(34,197,94,0.08)", opacity: passed.length===0 ? 0.6 : 1 }}>
+                    <ColHeaders sectionKey="passed" />
+                    {passed.length === 0
+                      ? <div style={{ padding:"28px 20px", textAlign:"center", color:"#94a3b8", fontSize:13 }}>No properties marked as passed yet.</div>
+                      : renderRows(passed)
+                    }
+                  </div>
+                </div>
+
               </div>
-          </div>
-        </div>
+            </div>
+          );
+        })()}
 
         <div className="grid-hint" style={{ padding:"0 20px 24px", color:"#cbd5e1", fontSize:12 }}>
-          Click any cell to edit &nbsp;&#183;&nbsp; Enter to confirm &nbsp;&#183;&nbsp; Esc to cancel &nbsp;&#183;&nbsp; Use "&#10024; Add Property" to auto-fill from a listing URL or text
+          Click any cell to edit &nbsp;&#183;&nbsp; Enter to confirm &nbsp;&#183;&nbsp; Esc to cancel &nbsp;&#183;&nbsp; Drag column headers to reorder &nbsp;&#183;&nbsp; Click numeric headers to sort &nbsp;&#183;&nbsp; Use "&#10024; Add Property" to auto-fill
         </div>
       </div>
 
       {showAddCol   && <AddColumnModal onAdd={addColumn} onClose={()=>setShowAddCol(false)}/>}
       {showAdmin    && <AdminPanel onClose={()=>setShowAdmin(false)}/>}
       {showQuickAdd && <QuickAddModal onAdd={quickAddProperty} onClose={()=>setShowQuickAdd(false)}/>}
+
+      {/* Reset Dashboard Confirm Modal */}
+      {showResetConfirm && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2000, backdropFilter:"blur(4px)" }}>
+          <div style={{ background:"#fff", borderRadius:16, padding:32, width:"min(420px,93vw)", boxShadow:"0 20px 60px rgba(0,0,0,0.18)", textAlign:"center", fontFamily:"'Inter',sans-serif" }}>
+            <div style={{ fontSize:48, marginBottom:12 }}>🗑</div>
+            <h3 style={{ fontFamily:"'Playfair Display',serif", fontSize:22, color:"#0f172a", margin:"0 0 10px" }}>Reset Your Dashboard?</h3>
+            <p style={{ color:"#64748b", fontSize:13, margin:"0 0 6px", lineHeight:1.6 }}>
+              This will permanently delete all <strong>{rows.length} propert{rows.length===1?"y":"ies"}</strong> from your dashboard and reset columns to default.
+            </p>
+            <p style={{ color:"#94a3b8", fontSize:12, margin:"0 0 28px" }}>Other users' data is not affected.</p>
+            <div style={{ display:"flex", gap:10, justifyContent:"center" }}>
+              <button onClick={()=>setShowResetConfirm(false)}
+                style={{ background:"transparent", border:"1px solid #e2e8f0", borderRadius:8, padding:"11px 24px", color:"#64748b", cursor:"pointer", fontSize:14 }}>
+                Cancel
+              </button>
+              <button onClick={handleResetDashboard}
+                style={{ background:"#dc2626", border:"none", borderRadius:8, padding:"11px 24px", color:"#fff", cursor:"pointer", fontSize:14, fontWeight:700 }}>
+                Yes, Reset My Data
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

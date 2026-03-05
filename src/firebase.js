@@ -61,7 +61,7 @@ export async function getApprovedUsers() {
 }
 
 // ── Per-user helpers ───────────────────────────────────────────────────────────
-const userDoc    = (uid, docName) => doc(db, "users", uid, "data", docName);
+const userDoc    = (uid, docName) => { if (!uid) throw new Error("userDoc: uid is required"); return doc(db, "users", uid, "data", docName); };
 const sharedDoc  = (...path)       => doc(db, "shared", ...path);
 
 // ── Tracker data (shared, all users read, admin-only write) ───────────────────
@@ -193,4 +193,12 @@ export async function loadUserAmenitiesConfig(uid) {
 }
 export async function saveUserAmenitiesConfig(uid, items) {
   await setDoc(userDoc(uid, "amenities_config"), { items, updatedAt: Date.now() });
+}
+
+// ── Clear user's own dashboard data ───────────────────────────────────────────
+export async function clearUserDashboard(uid) {
+  await Promise.all([
+    deleteDoc(userDoc(uid, "tracker_rows")),
+    deleteDoc(userDoc(uid, "tracker_cols")),
+  ]);
 }
