@@ -331,18 +331,27 @@ function Cell({ col, value: rawValue, onChange, editing, onStartEdit, onEndEdit,
   );
   if (col.type==="rating") return <div style={{ ...cs, cursor:"default" }}><StarRating value={value} onChange={onChange}/></div>;
   if (col.type==="status_tag") {
-    const isConsidering = !value || value === "Under Consideration";
-    const next = isConsidering ? "Analysed & Passed" : "Under Consideration";
-    const styles = isConsidering
-      ? { bg:"#eff6ff", border:"#bfdbfe", text:"#1d4ed8", dot:"#3b82f6", label:"Under Consideration" }
-      : { bg:"#f0fdf4", border:"#bbf7d0", text:"#15803d", dot:"#22c55e", label:"Analysed & Passed"  };
+    const STATUS_STYLES = {
+      "Under Consideration": { bg:"#eff6ff", border:"#bfdbfe", text:"#1d4ed8", dot:"#3b82f6" },
+      "Analysed & Passed":   { bg:"#f0fdf4", border:"#bbf7d0", text:"#15803d", dot:"#22c55e" },
+      "Offered & Missed":    { bg:"#fff7ed", border:"#fed7aa", text:"#c2410c", dot:"#f97316" },
+    };
+    const current = value && STATUS_STYLES[value] ? value : "Under Consideration";
+    const st = STATUS_STYLES[current];
     return (
-      <div style={{ ...cs, cursor:"pointer", padding:"0 10px" }}
-        onClick={() => onChange(next)}
-        title={`Click to mark as "${next}"`}>
-        <div style={{ display:"flex", alignItems:"center", gap:7, background:styles.bg, border:`1px solid ${styles.border}`, borderRadius:20, padding:"4px 11px", width:"100%", boxSizing:"border-box" }}>
-          <div style={{ width:7, height:7, borderRadius:"50%", background:styles.dot, flexShrink:0 }}/>
-          <span style={{ fontSize:11, fontWeight:700, color:styles.text, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{styles.label}</span>
+      <div style={{ ...cs, padding:"0 8px" }}>
+        <div style={{ position:"relative", width:"100%" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:6, background:st.bg, border:`1px solid ${st.border}`, borderRadius:20, padding:"3px 8px 3px 10px", width:"100%", boxSizing:"border-box" }}>
+            <div style={{ width:7, height:7, borderRadius:"50%", background:st.dot, flexShrink:0 }}/>
+            <span style={{ fontSize:11, fontWeight:700, color:st.text, flex:1, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{current}</span>
+            <select
+              value={current}
+              onChange={e => onChange(e.target.value)}
+              style={{ position:"absolute", inset:0, opacity:0, cursor:"pointer", width:"100%", height:"100%" }}>
+              {Object.keys(STATUS_STYLES).map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <span style={{ fontSize:8, color:st.dot, flexShrink:0 }}>▼</span>
+          </div>
         </div>
       </div>
     );
@@ -1401,9 +1410,10 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
           {/* Stats */}
           <div className="stat-cards" style={{ display:"flex", gap:12, marginTop:16, flexWrap:"wrap" }}>
             {[
-              { label:"Total Properties",     value:rows.length,                                                      color:"#0ea5e9" },
-              { label:"Under Consideration",  value:rows.filter(r=>!r.status||r.status==="Under Consideration").length, color:"#3b82f6" },
-              { label:"Analysed & Passed",    value:rows.filter(r=>r.status==="Analysed & Passed").length,             color:"#22c55e" },
+              { label:"Total Properties",     value:rows.length,                                                               color:"#0ea5e9" },
+              { label:"Under Consideration",  value:rows.filter(r=>!r.status||r.status==="Under Consideration").length,        color:"#3b82f6" },
+              { label:"Analysed & Passed",    value:rows.filter(r=>r.status==="Analysed & Passed").length,                    color:"#22c55e" },
+              { label:"Offered & Missed",     value:rows.filter(r=>r.status==="Offered & Missed").length,                    color:"#f97316" },
             ].map(s=>(
               <div key={s.label} className="stat-card" style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:10, padding:"12px 16px", display:"flex", alignItems:"center", gap:10 }}>
                 <div style={{ width:4, height:36, borderRadius:2, background:s.color }}/>
@@ -1516,6 +1526,7 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
 
           const considering = sortRows(rows.filter(r => !r.status || r.status === "Under Consideration"));
           const passed      = sortRows(rows.filter(r => r.status === "Analysed & Passed"));
+          const offeredMissed = sortRows(rows.filter(r => r.status === "Offered & Missed"));
 
           return (
             <div className="grid-wrap" style={{ overflowX:"auto", padding:"16px 12px 40px" }}>
@@ -1539,7 +1550,7 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
                 </div>
 
                 {/* ── Analysed & Passed ── */}
-                <div>
+                <div style={{ marginBottom:24 }}>
                   <div style={{ display:"flex", alignItems:"center", gap:10, padding:"0 4px 10px" }}>
                     <div style={{ width:10, height:10, borderRadius:"50%", background:"#22c55e", flexShrink:0 }}/>
                     <span style={{ fontSize:13, fontWeight:700, color:"#15803d", textTransform:"uppercase", letterSpacing:1 }}>Analysed & Passed</span>
@@ -1550,6 +1561,22 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
                     {passed.length === 0
                       ? <div style={{ padding:"28px 20px", textAlign:"center", color:"#94a3b8", fontSize:13 }}>No properties marked as passed yet.</div>
                       : renderRows(passed)
+                    }
+                  </div>
+                </div>
+
+                {/* ── Offered & Missed ── */}
+                <div>
+                  <div style={{ display:"flex", alignItems:"center", gap:10, padding:"0 4px 10px" }}>
+                    <div style={{ width:10, height:10, borderRadius:"50%", background:"#f97316", flexShrink:0 }}/>
+                    <span style={{ fontSize:13, fontWeight:700, color:"#c2410c", textTransform:"uppercase", letterSpacing:1 }}>Offered & Missed</span>
+                    <span style={{ background:"#fff7ed", border:"1px solid #fed7aa", borderRadius:20, padding:"1px 10px", fontSize:11, fontWeight:700, color:"#c2410c" }}>{offeredMissed.length}</span>
+                  </div>
+                  <div style={{ background:"#fff", border:"1px solid #fed7aa", borderRadius:12, overflow:"hidden", boxShadow:"0 1px 4px rgba(249,115,22,0.08)", opacity: offeredMissed.length===0 ? 0.6 : 1 }}>
+                    <ColHeaders sectionKey="offeredMissed" />
+                    {offeredMissed.length === 0
+                      ? <div style={{ padding:"28px 20px", textAlign:"center", color:"#94a3b8", fontSize:13 }}>No offered & missed properties yet.</div>
+                      : renderRows(offeredMissed)
                     }
                   </div>
                 </div>
