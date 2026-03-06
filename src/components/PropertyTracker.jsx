@@ -23,6 +23,7 @@ const MANDATORY_COLUMNS = [
   { id:"agent_notes",     label:"Agent Notes",       type:"textarea", width:200, locked:true },
   { id:"amenities",        label:"Amenities",          type:"amenities", width:220, locked:true },
   { id:"score_card",       label:"Score Card",         type:"score_card", width:140, locked:true },
+  { id:"ph_heatmap",        label:"PH Heatmap",         type:"ph_heatmap",   width:140, locked:true },
   { id:"sale_history",      label:"Sale History",       type:"sale_history", width:130, locked:true },
 ];
 
@@ -30,8 +31,8 @@ const MANDATORY_COLUMNS = [
 const SORTABLE_COLS = new Set(["price","offer_price","rental_appraisal","cost_of_purchase","yield","land","score_card"]);
 
 const INITIAL_ROWS = [
-  { id:1, status:"Under Consideration", address:"", property:"", price:"", config:"", land:"", ph_rating:"", calc_ph:"", suburb:"", state:"", type:"", offer_price:"", rental_appraisal:"", cost_of_purchase:"", yield:"", comments:"", agent_notes:"", amenities:[], score_card:"", sale_history:[] },
-  { id:2, status:"Under Consideration", address:"", property:"", price:"", config:"", land:"", ph_rating:"", calc_ph:"", suburb:"", state:"", type:"", offer_price:"", rental_appraisal:"", cost_of_purchase:"", yield:"", comments:"", agent_notes:"", amenities:[], score_card:"", sale_history:[] },
+  { id:1, status:"Under Consideration", address:"", property:"", price:"", config:"", land:"", ph_rating:"", calc_ph:"", suburb:"", state:"", type:"", offer_price:"", rental_appraisal:"", cost_of_purchase:"", yield:"", comments:"", agent_notes:"", amenities:[], score_card:"", ph_heatmap:"", sale_history:[] },
+  { id:2, status:"Under Consideration", address:"", property:"", price:"", config:"", land:"", ph_rating:"", calc_ph:"", suburb:"", state:"", type:"", offer_price:"", rental_appraisal:"", cost_of_purchase:"", yield:"", comments:"", agent_notes:"", amenities:[], score_card:"", ph_heatmap:"", sale_history:[] },
 ];
 
 // ── AI Property Extractor (via Firebase Cloud Function proxy) ─────────────────
@@ -310,7 +311,7 @@ function Cell({ col, value: rawValue, onChange, editing, onStartEdit, onEndEdit,
 
   const cs = {
     width:col.width, minWidth:col.width, maxWidth:col.width,
-    height: col.type==="image"||col.type==="textarea" ? 72 : 48,
+    height: col.type==="image"||col.type==="textarea"||col.type==="ph_heatmap" ? 72 : 48,
     padding:"0 12px", boxSizing:"border-box", display:"flex", alignItems:"center",
     borderRight:"1px solid #e2e8f0", borderBottom:"1px solid #e2e8f0",
     overflow:"hidden", flexShrink:0,
@@ -490,6 +491,124 @@ function Cell({ col, value: rawValue, onChange, editing, onStartEdit, onEndEdit,
                   );
                 })
             }
+          </div>,
+          document.body
+        )}
+      </div>
+    );
+  }
+  if (col.type==="ph_heatmap") {
+    const [lightbox,  setLightbox]  = useState(false);
+    const [inputMode, setInputMode] = useState(false); // url input or file
+    const [urlDraft,  setUrlDraft]  = useState("");
+    const fileRef = useRef();
+    const trigRef2 = useRef();
+
+    const openLightbox = (e) => { e.stopPropagation(); setLightbox(true); setInputMode(false); setUrlDraft(""); };
+    const closeLightbox = () => { setLightbox(false); setInputMode(false); };
+
+    const handleFile = (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => { onChange(ev.target.result); closeLightbox(); };
+      reader.readAsDataURL(file);
+    };
+
+    const handleUrlSave = () => {
+      if (urlDraft.trim()) { onChange(urlDraft.trim()); }
+      closeLightbox();
+    };
+
+    const handlePaste = (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          const reader = new FileReader();
+          reader.onload = (ev) => { onChange(ev.target.result); closeLightbox(); };
+          reader.readAsDataURL(file);
+          return;
+        }
+      }
+    };
+
+    return (
+      <div ref={trigRef2}
+        style={{ ...cs, height:72, cursor:"pointer", padding:"4px 6px", justifyContent:"center", flexDirection:"column", gap:4 }}
+        onClick={value ? openLightbox : ()=>setLightbox(true)}>
+        {value
+          ? <img src={value} alt="PH Heatmap" style={{ width:"100%", height:64, objectFit:"cover", borderRadius:6, display:"block" }}/>
+          : <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", height:64, gap:4, border:"1.5px dashed #e2e8f0", borderRadius:6, background:"#f8fafc" }}>
+              <span style={{ fontSize:16 }}>🗺</span>
+              <span style={{ color:"#cbd5e1", fontSize:9, fontWeight:600, textTransform:"uppercase", letterSpacing:0.8 }}>Add Heatmap</span>
+            </div>
+        }
+
+        {lightbox && createPortal(
+          <div style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.75)", zIndex:4000, display:"flex", alignItems:"center", justifyContent:"center", backdropFilter:"blur(6px)" }}
+            onClick={closeLightbox} onPaste={handlePaste}>
+            <div style={{ background:"#fff", borderRadius:18, boxShadow:"0 30px 80px rgba(0,0,0,0.3)", width:"min(680px,95vw)", maxHeight:"90vh", overflow:"hidden", display:"flex", flexDirection:"column" }}
+              onClick={e=>e.stopPropagation()}>
+
+              {/* Header */}
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px 20px", borderBottom:"1px solid #f1f5f9" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{ fontSize:18 }}>🗺</span>
+                  <span style={{ fontFamily:"'Playfair Display',serif", fontWeight:700, fontSize:16, color:"#0f172a" }}>PH Heatmap</span>
+                </div>
+                <div style={{ display:"flex", gap:8 }}>
+                  {value && (
+                    <button onClick={()=>{onChange("");closeLightbox();}}
+                      style={{ border:"1px solid #fecaca", background:"#fef2f2", borderRadius:8, padding:"6px 12px", color:"#dc2626", fontSize:12, fontWeight:600, cursor:"pointer" }}>
+                      🗑 Remove
+                    </button>
+                  )}
+                  <button onClick={closeLightbox}
+                    style={{ border:"1px solid #e2e8f0", background:"#f8fafc", borderRadius:8, width:32, height:32, cursor:"pointer", color:"#64748b", fontSize:15, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+                </div>
+              </div>
+
+              {/* Image preview */}
+              {value && (
+                <div style={{ padding:"16px 20px 0", flex:1, overflow:"auto", maxHeight:400 }}>
+                  <img src={value} alt="PH Heatmap" style={{ width:"100%", borderRadius:10, display:"block", objectFit:"contain", maxHeight:360 }}/>
+                </div>
+              )}
+
+              {/* Upload options */}
+              <div style={{ padding:"16px 20px 20px" }}>
+                <div style={{ fontSize:11, fontWeight:700, color:"#64748b", textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>
+                  {value ? "Replace Image" : "Add Heatmap Image"}
+                </div>
+                <div style={{ display:"flex", gap:8, marginBottom:10 }}>
+                  {/* File upload */}
+                  <button onClick={()=>fileRef.current?.click()}
+                    style={{ flex:1, border:"1px solid #e2e8f0", background:"#f8fafc", borderRadius:10, padding:"12px", cursor:"pointer", textAlign:"center", color:"#64748b", fontSize:12, fontWeight:500 }}>
+                    📁 Upload Image
+                  </button>
+                  <button onClick={()=>setInputMode(m=>!m)}
+                    style={{ flex:1, border:"1px solid #e2e8f0", background:"#f8fafc", borderRadius:10, padding:"12px", cursor:"pointer", textAlign:"center", color:"#64748b", fontSize:12, fontWeight:500 }}>
+                    🔗 Paste URL
+                  </button>
+                </div>
+                {inputMode && (
+                  <div style={{ display:"flex", gap:8 }}>
+                    <input autoFocus value={urlDraft} onChange={e=>setUrlDraft(e.target.value)}
+                      onKeyDown={e=>e.key==="Enter"&&handleUrlSave()}
+                      placeholder="https://... paste image URL here"
+                      style={{ flex:1, border:"1px solid #e2e8f0", borderRadius:8, padding:"8px 12px", fontSize:12, outline:"none", fontFamily:"inherit" }}/>
+                    <button onClick={handleUrlSave}
+                      style={{ border:"none", background:"#0ea5e9", borderRadius:8, padding:"8px 16px", color:"#fff", fontWeight:600, fontSize:12, cursor:"pointer" }}>Save</button>
+                  </div>
+                )}
+                <div style={{ marginTop:10, color:"#94a3b8", fontSize:11, textAlign:"center" }}>
+                  💡 You can also Ctrl+V / ⌘+V to paste a screenshot directly
+                </div>
+                <input ref={fileRef} type="file" accept="image/*" style={{ display:"none" }} onChange={handleFile}/>
+              </div>
+            </div>
           </div>,
           document.body
         )}
@@ -1054,6 +1173,7 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
           ph_rating: Array.isArray(row.ph_rating) ? (row.ph_rating[0] || "") : (row.ph_rating || ""),
           status: row.status || "Under Consideration",
           amenities: Array.isArray(row.amenities) ? row.amenities : [],
+          ph_heatmap: row.ph_heatmap || "",
           sale_history: Array.isArray(row.sale_history) ? row.sale_history : [],
           calc_ph: row.calc_ph || "",
           score_card: row.score_card || "",
@@ -1114,7 +1234,7 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
       return updated;
     });
   };
-  const addRow       = () => { const row={id:nextId, status:"Under Consideration", amenities:[], score_card:"", sale_history:[], ...Object.fromEntries(columns.map(c=>[c.id,""]))}; setNextId(n=>n+1); saveRows([...rows,row]); };
+  const addRow       = () => { const row={id:nextId, status:"Under Consideration", amenities:[], score_card:"", ph_heatmap:"", sale_history:[], ...Object.fromEntries(columns.map(c=>[c.id,""]))}; setNextId(n=>n+1); saveRows([...rows,row]); };
   const deleteRows   = () => { saveRows(rows.filter(r=>!selectedRows.has(r.id))); setSelectedRows(new Set()); };
   const addColumn    = col => { saveCols([...columns,col]); saveRows(rows.map(r=>({...r,[col.id]:""})));};
 
@@ -1232,6 +1352,7 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
       status:      "Under Consideration",
       amenities:   [],
       score_card:  "",
+      ph_heatmap:   "",
       sale_history: [],
       ...Object.fromEntries(columns.map(c=>[c.id,""])),
       property:    parsed.property  || "",
