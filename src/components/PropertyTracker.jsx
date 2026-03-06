@@ -23,14 +23,15 @@ const MANDATORY_COLUMNS = [
   { id:"agent_notes",     label:"Agent Notes",       type:"textarea", width:200, locked:true },
   { id:"amenities",        label:"Amenities",          type:"amenities", width:220, locked:true },
   { id:"score_card",       label:"Score Card",         type:"score_card", width:140, locked:true },
+  { id:"sale_history",      label:"Sale History",       type:"sale_history", width:130, locked:true },
 ];
 
 // Columns that support sort (numeric/currency/percent)
 const SORTABLE_COLS = new Set(["price","offer_price","rental_appraisal","cost_of_purchase","yield","land","score_card"]);
 
 const INITIAL_ROWS = [
-  { id:1, status:"Under Consideration", address:"", property:"", price:"", config:"", land:"", ph_rating:"", calc_ph:"", suburb:"", state:"", type:"", offer_price:"", rental_appraisal:"", cost_of_purchase:"", yield:"", comments:"", agent_notes:"", amenities:[], score_card:"" },
-  { id:2, status:"Under Consideration", address:"", property:"", price:"", config:"", land:"", ph_rating:"", calc_ph:"", suburb:"", state:"", type:"", offer_price:"", rental_appraisal:"", cost_of_purchase:"", yield:"", comments:"", agent_notes:"", amenities:[], score_card:"" },
+  { id:1, status:"Under Consideration", address:"", property:"", price:"", config:"", land:"", ph_rating:"", calc_ph:"", suburb:"", state:"", type:"", offer_price:"", rental_appraisal:"", cost_of_purchase:"", yield:"", comments:"", agent_notes:"", amenities:[], score_card:"", sale_history:[] },
+  { id:2, status:"Under Consideration", address:"", property:"", price:"", config:"", land:"", ph_rating:"", calc_ph:"", suburb:"", state:"", type:"", offer_price:"", rental_appraisal:"", cost_of_purchase:"", yield:"", comments:"", agent_notes:"", amenities:[], score_card:"", sale_history:[] },
 ];
 
 // ── AI Property Extractor (via Firebase Cloud Function proxy) ─────────────────
@@ -285,7 +286,9 @@ function PhTag({ colour }) {
 // ── Cell ───────────────────────────────────────────────────────────────────────
 function Cell({ col, value: rawValue, onChange, editing, onStartEdit, onEndEdit, onAnalyse, analysing, readonly }) {
   // Coerce value — arrays/numbers/null must never reach string renderers
-  const value = (rawValue === null || rawValue === undefined || Array.isArray(rawValue)) ? "" : rawValue;
+  // Exception: sale_history and amenities are arrays and have dedicated renderers
+  const isArrayCol = col.type === "sale_history" || col.type === "amenities";
+  const value = (rawValue === null || rawValue === undefined || (Array.isArray(rawValue) && !isArrayCol)) ? "" : rawValue;
   const [local,    setLocal]    = useState(String(value));
   const [hovering, setHovering] = useState(false);
   const ref       = useRef();
@@ -478,6 +481,294 @@ function Cell({ col, value: rawValue, onChange, editing, onStartEdit, onEndEdit,
                   );
                 })
             }
+          </div>,
+          document.body
+        )}
+      </div>
+    );
+  }
+  if (col.type==="sale_history") {
+    const sales = Array.isArray(value) ? [...value].sort((a,b) => Number(a.year)-Number(b.year)) : [];
+    const [modalOpen, setModalOpen] = useState(false);
+    const [editSales, setEditSales] = useState([]);
+    const [newYear,   setNewYear]   = useState("");
+    const [newPrice,  setNewPrice]  = useState("");
+    const [newNote,   setNewNote]   = useState("");
+    const [modalPos,  setModalPos]  = useState({ top:0, left:0 });
+    const trigRef = useRef();
+
+    const openModal = (e) => {
+      e.stopPropagation();
+      const rect = trigRef.current?.getBoundingClientRect();
+      if (rect) {
+        const left = Math.min(rect.left + window.scrollX, window.innerWidth - 520 - 10);
+        const top  = rect.bottom + window.scrollY + 6;
+        setModalPos({ top: Math.max(10, top), left: Math.max(10, left) });
+      }
+      setEditSales([...sales]);
+      setNewYear(""); setNewPrice(""); setNewNote("");
+      setModalOpen(true);
+    };
+
+    const addEntry = () => {
+      const yr = parseInt(newYear, 10);
+      const pr = parseFloat(String(newPrice).replace(/[,$]/g,""));
+      if (!yr || isNaN(pr)) return;
+      const updated = [...editSales.filter(s=>String(s.year)!==String(yr)), { year:yr, price:pr, note:newNote.trim() }]
+        .sort((a,b)=>a.year-b.year);
+      setEditSales(updated);
+      setNewYear(""); setNewPrice(""); setNewNote("");
+    };
+
+    const removeEntry = (yr) => setEditSales(editSales.filter(s=>String(s.year)!==String(yr)));
+
+    const saveModal = () => { onChange(editSales); setModalOpen(false); };
+
+    // Sparkline SVG
+    const W=100, H=32, PAD=4;
+    const SparkLine = ({ data }) => {
+      if (!data || data.length < 2) return (
+        <div style={{ width:W, height:H, display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <span style={{ color:"#cbd5e1", fontSize:10 }}>{data.length===1?"1 sale":"No data"}</span>
+        </div>
+      );
+      const prices = data.map(d=>d.price);
+      const minP = Math.min(...prices), maxP = Math.max(...prices);
+      const range = maxP - minP || 1;
+      const pts = data.map((d,i)=>({
+        x: PAD + (i/(data.length-1))*(W-PAD*2),
+        y: PAD + (1-(d.price-minP)/range)*(H-PAD*2),
+      }));
+      const pathD = pts.map((p,i)=>`${i===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+      const areaD = pathD + ` L${pts[pts.length-1].x.toFixed(1)},${H} L${pts[0].x.toFixed(1)},${H} Z`;
+      const isUp  = prices[prices.length-1] >= prices[0];
+      const stroke = isUp ? "#22c55e" : "#ef4444";
+      const fill   = isUp ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)";
+      return (
+        <svg width={W} height={H} style={{ overflow:"visible", flexShrink:0 }}>
+          <path d={areaD} fill={fill} stroke="none"/>
+          <path d={pathD} fill="none" stroke={stroke} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"/>
+          {pts.map((p,i)=><circle key={i} cx={p.x} cy={p.y} r={2.5} fill={stroke} stroke="#fff" strokeWidth={1}/>)}
+        </svg>
+      );
+    };
+
+    // Full chart SVG (modal)
+    const ChartSVG = ({ data }) => {
+      if (!data || data.length === 0) return <div style={{ textAlign:"center", color:"#94a3b8", padding:"40px 0", fontSize:13 }}>No sales recorded yet</div>;
+      const CW=460, CH=200, PL=72, PR=20, PT=20, PB=40;
+      const IW = CW-PL-PR, IH = CH-PT-PB;
+      const fmt = v => v>=1000000 ? `$${(v/1000000).toFixed(2)}M` : v>=1000 ? `$${(v/1000).toFixed(0)}k` : `$${v}`;
+
+      // Historical data
+      const sorted = [...data].sort((a,b)=>a.year-b.year);
+      const prices = sorted.map(d=>d.price);
+      const lastYear  = sorted[sorted.length-1].year;
+      const lastPrice = sorted[sorted.length-1].price;
+      const firstYear = sorted[0].year;
+      const firstPrice = sorted[0].price;
+
+      // CAGR from actual data
+      const histYears = lastYear - firstYear;
+      const cagrRate  = histYears > 0 ? Math.pow(lastPrice/firstPrice, 1/histYears) - 1 : 0.05;
+
+      // Project 10 years forward using CAGR
+      const PROJ_YEARS = 10;
+      const projData = Array.from({length:PROJ_YEARS+1}, (_,i) => ({
+        year:  lastYear + i,
+        price: lastPrice * Math.pow(1 + cagrRate, i),
+      }));
+      // Confidence band ±15% of projected value (median ± uncertainty)
+      const bandUpper = projData.map(p => ({ year:p.year, price: p.price * 1.15 }));
+      const bandLower = projData.map(p => ({ year:p.year, price: p.price * 0.85 }));
+
+      // Full X domain: first historical year → last projection year
+      const allYears  = sorted.map(d=>d.year).concat(projData.map(d=>d.year));
+      const minYear   = Math.min(...allYears);
+      const maxYear   = Math.max(...allYears);
+      const yearSpan  = maxYear - minYear || 1;
+
+      // Full Y domain: all historical + all band prices
+      const allPrices = prices
+        .concat(projData.map(d=>d.price))
+        .concat(bandUpper.map(d=>d.price))
+        .concat(bandLower.map(d=>d.price));
+      const minP = Math.min(...allPrices) * 0.92;
+      const maxP = Math.max(...allPrices) * 1.06;
+      const range = maxP - minP || 1;
+
+      const toX = year  => PL + ((year - minYear) / yearSpan) * IW;
+      const toY = price => PT + (1 - (price - minP) / range) * IH;
+
+      // Historical path
+      const histPts  = sorted.map(d => ({ x:toX(d.year), y:toY(d.price), ...d }));
+      const histPath = histPts.map((p,i)=>`${i===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+      const histArea = histPath + ` L${histPts[histPts.length-1].x.toFixed(1)},${PT+IH} L${PL},${PT+IH} Z`;
+
+      // Projection median path (dashed)
+      const projPts  = projData.map(d => ({ x:toX(d.year), y:toY(d.price), ...d }));
+      const projPath = projPts.map((p,i)=>`${i===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+
+      // Confidence band polygon
+      const upperPts = bandUpper.map(d => `${toX(d.year).toFixed(1)},${toY(d.price).toFixed(1)}`);
+      const lowerPts = [...bandLower].reverse().map(d => `${toX(d.year).toFixed(1)},${toY(d.price).toFixed(1)}`);
+      const bandPath = `M ${upperPts.join(" L ")} L ${lowerPts.join(" L ")} Z`;
+
+      const isUp   = lastPrice >= firstPrice;
+      const stroke = isUp ? "#22c55e" : "#ef4444";
+      const fill   = isUp ? "rgba(34,197,94,0.10)" : "rgba(239,68,68,0.10)";
+
+      // Y ticks
+      const yTicks = [0,0.25,0.5,0.75,1].map(t=>({ val:minP+t*range, y:PT+IH-t*IH }));
+
+      // X ticks: show first hist year, last hist year, proj midpoint, proj end
+      const xTickYears = [...new Set([
+        firstYear, lastYear,
+        Math.round(lastYear + PROJ_YEARS/2),
+        lastYear + PROJ_YEARS
+      ])];
+
+      // Projected end value for label
+      const projEnd = projData[projData.length-1];
+
+      return (
+        <svg width={CW} height={CH} style={{ width:"100%", height:"auto", display:"block" }}>
+          <defs>
+            <pattern id="proj-hatch" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+              <line x1="0" y1="0" x2="0" y2="6" stroke="#e0f2fe" strokeWidth="3"/>
+            </pattern>
+          </defs>
+
+          {/* Grid lines */}
+          {yTicks.map((t,i)=>(
+            <g key={i}>
+              <line x1={PL} y1={t.y.toFixed(0)} x2={CW-PR} y2={t.y.toFixed(0)} stroke="#f1f5f9" strokeWidth="1"/>
+              <text x={PL-6} y={t.y+4} textAnchor="end" fill="#94a3b8" fontSize="9">{fmt(t.val)}</text>
+            </g>
+          ))}
+
+          {/* Projection zone background */}
+          <rect x={toX(lastYear).toFixed(1)} y={PT} width={(IW-(toX(lastYear)-PL)).toFixed(1)} height={IH} fill="#f0f9ff" opacity="0.5"/>
+
+          {/* Confidence band */}
+          <path d={bandPath} fill="rgba(14,165,233,0.10)" stroke="none"/>
+          <path d={`M ${upperPts.join(" L ")}`} fill="none" stroke="#bae6fd" strokeWidth="1" strokeDasharray="3,3"/>
+          <path d={`M ${[...bandLower].reverse().map(d=>`${toX(d.year).toFixed(1)},${toY(d.price).toFixed(1)}`).join(" L ")}`} fill="none" stroke="#bae6fd" strokeWidth="1" strokeDasharray="3,3"/>
+
+          {/* "Projection" label */}
+          <text x={(toX(lastYear)+4).toFixed(1)} y={PT+10} fill="#7dd3fc" fontSize="8" fontWeight="700" textAnchor="start">PROJECTION ({(cagrRate*100).toFixed(1)}% CAGR)</text>
+
+          {/* Historical area + line */}
+          <path d={histArea} fill={fill}/>
+          <path d={histPath} fill="none" stroke={stroke} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"/>
+
+          {/* Projection median dashed line */}
+          <path d={projPath} fill="none" stroke="#0ea5e9" strokeWidth="2" strokeDasharray="5,4" strokeLinejoin="round" strokeLinecap="round"/>
+
+          {/* Historical data points + labels */}
+          {histPts.map((p,i)=>(
+            <g key={i}>
+              <circle cx={p.x.toFixed(1)} cy={p.y.toFixed(1)} r="4" fill={stroke} stroke="#fff" strokeWidth="1.5"/>
+              <text x={p.x.toFixed(1)} y={p.y-9} textAnchor="middle" fill={stroke} fontSize="9" fontWeight="600">{fmt(p.price)}</text>
+            </g>
+          ))}
+
+          {/* Projected end point + label */}
+          <circle cx={projPts[projPts.length-1].x.toFixed(1)} cy={projPts[projPts.length-1].y.toFixed(1)} r="4" fill="#0ea5e9" stroke="#fff" strokeWidth="1.5"/>
+          <text x={projPts[projPts.length-1].x.toFixed(1)} y={(projPts[projPts.length-1].y-9).toFixed(1)} textAnchor="middle" fill="#0369a1" fontSize="9" fontWeight="700">{fmt(projEnd.price)}</text>
+
+          {/* Divider line between history and projection */}
+          <line x1={toX(lastYear).toFixed(1)} y1={PT} x2={toX(lastYear).toFixed(1)} y2={PT+IH} stroke="#e2e8f0" strokeWidth="1" strokeDasharray="4,3"/>
+
+          {/* X axis labels */}
+          {xTickYears.map(yr=>(
+            <text key={yr} x={toX(yr).toFixed(1)} y={PT+IH+14} textAnchor="middle" fill={yr>lastYear?"#7dd3fc":"#64748b"} fontSize="9" fontWeight={yr===lastYear?"700":"400"}>{yr}</text>
+          ))}
+
+          {/* Axes */}
+          <line x1={PL} y1={PT} x2={PL} y2={PT+IH} stroke="#e2e8f0" strokeWidth="1"/>
+          <line x1={PL} y1={PT+IH} x2={CW-PR} y2={PT+IH} stroke="#e2e8f0" strokeWidth="1"/>
+        </svg>
+      );
+    };
+
+    // Growth calc
+    const growth = sales.length >= 2
+      ? ((sales[sales.length-1].price - sales[0].price) / sales[0].price * 100).toFixed(1)
+      : null;
+    const years = sales.length >= 2 ? sales[sales.length-1].year - sales[0].year : null;
+    const cagr = (sales.length>=2 && years>0)
+      ? ((Math.pow(sales[sales.length-1].price/sales[0].price, 1/years)-1)*100).toFixed(1)
+      : null;
+
+    return (
+      <div ref={trigRef} style={{ ...cs, cursor:"pointer", padding:"0 8px", justifyContent:"center" }} onClick={openModal}>
+        {sales.length === 0
+          ? <span style={{ color:"#cbd5e1", fontSize:11 }}>+ Add</span>
+          : <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:2, width:"100%" }}>
+              <SparkLine data={sales} />
+              {growth !== null && (
+                <span style={{ fontSize:9, fontWeight:700, color: Number(growth)>=0?"#15803d":"#dc2626" }}>
+                  {Number(growth)>=0?"+":""}{growth}% ({sales[0].year}–{sales[sales.length-1].year})
+                </span>
+              )}
+            </div>
+        }
+        {modalOpen && createPortal(
+          <div style={{ position:"fixed", inset:0, zIndex:3000 }} onClick={()=>setModalOpen(false)}>
+            <div style={{ position:"absolute", top:modalPos.top, left:modalPos.left, width:500, background:"#fff", borderRadius:16, boxShadow:"0 20px 60px rgba(0,0,0,0.18)", border:"1px solid #e2e8f0", fontFamily:"'Inter',sans-serif" }}
+              onClick={e=>e.stopPropagation()}>
+              {/* Header */}
+              <div style={{ padding:"16px 20px", borderBottom:"1px solid #f1f5f9", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                <div>
+                  <div style={{ fontFamily:"'Playfair Display',serif", fontSize:16, fontWeight:700, color:"#0f172a" }}>Sale History</div>
+                  {growth!==null && <div style={{ fontSize:11, color:"#64748b", marginTop:2 }}>
+                    Total growth: <strong style={{ color:Number(growth)>=0?"#15803d":"#dc2626" }}>{Number(growth)>=0?"+":""}{growth}%</strong>
+                    {cagr && <> &nbsp;·&nbsp; CAGR: <strong style={{ color:Number(cagr)>=0?"#15803d":"#dc2626" }}>{Number(cagr)>=0?"+":""}{cagr}%/yr</strong></>}
+                    {cagr && <> &nbsp;·&nbsp; <span style={{ color:"#0369a1" }}>10yr projection: <strong>${Math.round(editSales.length>0?editSales.sort((a,b)=>b.year-a.year)[0].price*Math.pow(1+Number(cagr)/100,10):0).toLocaleString()}</strong></span></>}
+                  </div>}
+                </div>
+                <button onClick={()=>setModalOpen(false)} style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:8, width:28, height:28, cursor:"pointer", color:"#64748b", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+              </div>
+              {/* Chart */}
+              <div style={{ padding:"16px 20px 8px" }}>
+                <ChartSVG data={editSales.sort((a,b)=>a.year-b.year)} />
+              </div>
+              {/* Entries table */}
+              {editSales.length > 0 && (
+                <div style={{ margin:"0 20px 12px", border:"1px solid #f1f5f9", borderRadius:8, overflow:"hidden" }}>
+                  <div style={{ display:"grid", gridTemplateColumns:"70px 100px 1fr 28px", background:"#f8fafc", padding:"6px 10px", fontSize:10, fontWeight:700, color:"#64748b", textTransform:"uppercase", letterSpacing:1 }}>
+                    <span>Year</span><span>Price</span><span>Note</span><span></span>
+                  </div>
+                  {[...editSales].sort((a,b)=>b.year-a.year).map(s=>(
+                    <div key={s.year} style={{ display:"grid", gridTemplateColumns:"70px 100px 1fr 28px", padding:"7px 10px", borderTop:"1px solid #f1f5f9", fontSize:12, alignItems:"center" }}>
+                      <span style={{ fontWeight:600, color:"#374151" }}>{s.year}</span>
+                      <span style={{ color:"#15803d", fontWeight:600 }}>${Number(s.price).toLocaleString()}</span>
+                      <span style={{ color:"#64748b", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{s.note||"—"}</span>
+                      <button onClick={()=>removeEntry(s.year)} style={{ background:"none", border:"none", color:"#ef4444", cursor:"pointer", fontSize:14, padding:0, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* Add entry */}
+              <div style={{ padding:"0 20px 16px" }}>
+                <div style={{ fontSize:11, fontWeight:600, color:"#64748b", textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>Add Sale</div>
+                <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                  <input value={newYear} onChange={e=>setNewYear(e.target.value)} placeholder="Year e.g. 2018"
+                    style={{ width:110, border:"1px solid #e2e8f0", borderRadius:8, padding:"7px 10px", fontSize:12, outline:"none", fontFamily:"inherit" }}/>
+                  <input value={newPrice} onChange={e=>setNewPrice(e.target.value)} placeholder="Price e.g. 620000"
+                    style={{ width:130, border:"1px solid #e2e8f0", borderRadius:8, padding:"7px 10px", fontSize:12, outline:"none", fontFamily:"inherit" }}/>
+                  <input value={newNote} onChange={e=>setNewNote(e.target.value)} placeholder="Note (optional)"
+                    style={{ flex:1, minWidth:100, border:"1px solid #e2e8f0", borderRadius:8, padding:"7px 10px", fontSize:12, outline:"none", fontFamily:"inherit" }}/>
+                  <button onClick={addEntry} style={{ background:"#0ea5e9", border:"none", borderRadius:8, padding:"7px 14px", color:"#fff", fontWeight:600, fontSize:12, cursor:"pointer" }}>+ Add</button>
+                </div>
+              </div>
+              {/* Footer */}
+              <div style={{ padding:"12px 20px", borderTop:"1px solid #f1f5f9", display:"flex", justifyContent:"flex-end", gap:8 }}>
+                <button onClick={()=>setModalOpen(false)} style={{ background:"transparent", border:"1px solid #e2e8f0", borderRadius:8, padding:"8px 18px", color:"#64748b", cursor:"pointer", fontSize:13 }}>Cancel</button>
+                <button onClick={saveModal} style={{ background:"#0f172a", border:"none", borderRadius:8, padding:"8px 18px", color:"#fff", fontWeight:600, fontSize:13, cursor:"pointer" }}>Save</button>
+              </div>
+            </div>
           </div>,
           document.body
         )}
@@ -753,6 +1044,8 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
           ...row,
           ph_rating: Array.isArray(row.ph_rating) ? (row.ph_rating[0] || "") : (row.ph_rating || ""),
           status: row.status || "Under Consideration",
+          amenities: Array.isArray(row.amenities) ? row.amenities : [],
+          sale_history: Array.isArray(row.sale_history) ? row.sale_history : [],
           calc_ph: row.calc_ph || "",
           score_card: row.score_card || "",
         }));
@@ -812,7 +1105,7 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
       return updated;
     });
   };
-  const addRow       = () => { const row={id:nextId, status:"Under Consideration", amenities:[], score_card:"", ...Object.fromEntries(columns.map(c=>[c.id,""]))}; setNextId(n=>n+1); saveRows([...rows,row]); };
+  const addRow       = () => { const row={id:nextId, status:"Under Consideration", amenities:[], score_card:"", sale_history:[], ...Object.fromEntries(columns.map(c=>[c.id,""]))}; setNextId(n=>n+1); saveRows([...rows,row]); };
   const deleteRows   = () => { saveRows(rows.filter(r=>!selectedRows.has(r.id))); setSelectedRows(new Set()); };
   const addColumn    = col => { saveCols([...columns,col]); saveRows(rows.map(r=>({...r,[col.id]:""})));};
 
@@ -930,6 +1223,7 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
       status:      "Under Consideration",
       amenities:   [],
       score_card:  "",
+      sale_history: [],
       ...Object.fromEntries(columns.map(c=>[c.id,""])),
       property:    parsed.property  || "",
       address:     parsed.address   || "",
@@ -1036,6 +1330,10 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
             <button onClick={()=>{ onNavigate&&onNavigate("dsr"); setNavOpen(false); }}
               style={{ background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:8, padding:"6px 12px", color:"#0369a1", cursor:"pointer", fontSize:12, fontWeight:500, whiteSpace:"nowrap" }}>
               📊 DSR Data
+            </button>
+            <button onClick={()=>{ onNavigate&&onNavigate("checklist"); setNavOpen(false); }}
+              style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:8, padding:"6px 12px", color:"#15803d", cursor:"pointer", fontSize:12, fontWeight:500, whiteSpace:"nowrap" }}>
+              ✅ Checklist
             </button>
           </div>
           <div style={{ display:"flex", alignItems:"center", gap:8 }}>

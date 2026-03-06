@@ -9,6 +9,7 @@ import SuburbProfiles   from "./components/SuburbProfiles.jsx";
 import StreetProfiles   from "./components/StreetProfiles.jsx";
 import AmenitiesConfig  from "./components/AmenitiesConfig.jsx";
 import DsrData         from "./components/DsrData.jsx";
+import PropertyChecklist from "./components/PropertyChecklist.jsx";
 
 const ADMIN_EMAIL = "cmshiyas007@gmail.com";
 
@@ -53,6 +54,7 @@ export default function App() {
   if (page === "street-profiles")   return <StreetProfiles   onBack={() => setPage("dashboard")} isAdmin={user.email === ADMIN_EMAIL} />;
   if (page === "amenities")          return <AmenitiesConfig  onBack={() => setPage("dashboard")} isAdmin={user.email === ADMIN_EMAIL} user={user} />;
   if (page === "dsr")                return <DsrData         onBack={() => setPage("dashboard")} isAdmin={user.email === ADMIN_EMAIL} />;
+  if (page === "checklist")          return <PropertyChecklist onBack={() => setPage("dashboard")} user={user} />;
 
   return (
     <PropertyTracker
