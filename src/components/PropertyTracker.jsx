@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { loadTrackerData, saveTrackerRows, saveTrackerCols, loadUserTrackerData, saveUserTrackerRows, saveUserTrackerCols, clearUserDashboard, loadPurchaseCosts, onPendingCountChange, loadStreetProfiles, loadAmenities, DEFAULT_AMENITIES, loadUserAmenitiesSelections, saveUserAmenitiesSelections, loadUserAmenitiesConfig, loadGuestNavAccess, saveGuestNavAccess, DEFAULT_GUEST_NAV } from "../firebase.js";
 import { calcStampDuty, formatCurrency } from "../stampDuty.js";
 import AdminPanel from "./AdminPanel.jsx";
+import HelpPanel  from "./HelpPanel.jsx";
 
 const MANDATORY_COLUMNS = [
   { id:"status",      label:"Status",      type:"status_tag", width:170, locked:true },
@@ -1132,6 +1133,7 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
   const [showAddCol,   setShowAddCol]   = useState(false);
   const [showAdmin,    setShowAdmin]    = useState(false);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
+  const [showHelp,     setShowHelp]     = useState(false);
   const [nextId,       setNextId]       = useState(3);
   const [selectedRows, setSelectedRows] = useState(new Set());
   const [saving,       setSaving]       = useState(false);
@@ -1482,6 +1484,11 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
                 )}
               </button>
             )}
+            <button onClick={()=>setShowHelp(true)}
+              style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:8, width:32, height:32, cursor:"pointer", color:"#64748b", fontSize:15, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center" }}
+              title="Help & Guide">
+              ?
+            </button>
             <div className="user-chip" style={{ display:"flex", alignItems:"center", gap:6, background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:24, padding:"4px 10px 4px 5px" }}>
               {user.photoURL && <img src={user.photoURL} alt="" style={{ width:24, height:24, borderRadius:"50%", objectFit:"cover" }}/>}
               <span className="name" style={{ color:"#374151", fontSize:12, fontWeight:500, maxWidth:120, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{user.displayName||user.email}</span>
@@ -1718,6 +1725,7 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
 
       {showAddCol   && <AddColumnModal onAdd={addColumn} onClose={()=>setShowAddCol(false)}/>}
       {showAdmin    && <AdminPanel onClose={()=>setShowAdmin(false)}/>}
+      {showHelp     && <HelpPanel onClose={()=>setShowHelp(false)} isAdmin={isAdmin}/>}
       {showQuickAdd && <QuickAddModal onAdd={quickAddProperty} onClose={()=>setShowQuickAdd(false)}/>}
 
 
