@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import { loadTrackerData, saveTrackerRows, saveTrackerCols, loadUserTrackerData, saveUserTrackerRows, saveUserTrackerCols, clearUserDashboard, loadPurchaseCosts, onPendingCountChange, loadStreetProfiles, loadAmenities, DEFAULT_AMENITIES, loadUserAmenitiesSelections, saveUserAmenitiesSelections, loadUserAmenitiesConfig } from "../firebase.js";
+import { loadTrackerData, saveTrackerRows, saveTrackerCols, loadUserTrackerData, saveUserTrackerRows, saveUserTrackerCols, clearUserDashboard, loadPurchaseCosts, onPendingCountChange, loadStreetProfiles, loadAmenities, DEFAULT_AMENITIES, loadUserAmenitiesSelections, saveUserAmenitiesSelections, loadUserAmenitiesConfig, loadGuestNavAccess, saveGuestNavAccess, DEFAULT_GUEST_NAV } from "../firebase.js";
 import { calcStampDuty, formatCurrency } from "../stampDuty.js";
 import AdminPanel from "./AdminPanel.jsx";
 
@@ -1140,6 +1140,8 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
   const [saveError,      setSaveError]      = useState("");
   const [dupAlert,       setDupAlert]       = useState("");
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [guestNav,        setGuestNav]        = useState(DEFAULT_GUEST_NAV);
+  const [showNavConfig,   setShowNavConfig]   = useState(false);
   const [dragColId,      setDragColId]      = useState(null); // column being dragged
   const [dragOverColId,  setDragOverColId]  = useState(null); // column being hovered over
   const [sortCol,        setSortCol]        = useState(null);  // column id to sort by
@@ -1187,6 +1189,7 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
     };
     initTracker();
     loadPurchaseCosts().then(d => { if(d) { setPurchaseCosts(d); purchaseCostsRef.current = d; } });
+    loadGuestNavAccess().then(d => setGuestNav(d));
     loadStreetProfiles().then(d => setStreetProfiles(d));
     // Load user's own amenities config; fall back to shared admin list, then hardcoded defaults
     Promise.all([loadAmenities(), loadUserAmenitiesConfig(user.uid)]).then(([shared, userCfg]) => {
@@ -1440,33 +1443,34 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
             {dupAlert  && <span style={{ color:"#b45309", fontSize:10, background:"#fffbeb", border:"1px solid #fde68a", borderRadius:20, padding:"2px 10px", fontWeight:600 }}>⚠ {dupAlert}</span>}
           </div>
           {/* Nav links — hidden on mobile, shown via hamburger */}
-          <div className={"nav-links" + (navOpen ? " open" : "")} style={{ display:"flex", alignItems:"center", gap:8 }}>
-            <button onClick={()=>{ onNavigate&&onNavigate("purchase-costs"); setNavOpen(false); }}
-              style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:8, padding:"6px 12px", color:"#16a34a", cursor:"pointer", fontSize:12, fontWeight:500, whiteSpace:"nowrap" }}>
-              💰 Purchase Costs
-            </button>
-            <button onClick={()=>{ onNavigate&&onNavigate("suburb-profiles"); setNavOpen(false); }}
-              style={{ background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:8, padding:"6px 12px", color:"#0369a1", cursor:"pointer", fontSize:12, fontWeight:500, whiteSpace:"nowrap" }}>
-              🏘 Suburb Profiles
-            </button>
-            <button onClick={()=>{ onNavigate&&onNavigate("street-profiles"); setNavOpen(false); }}
-              style={{ background:"#fffbeb", border:"1px solid #fde68a", borderRadius:8, padding:"6px 12px", color:"#b45309", cursor:"pointer", fontSize:12, fontWeight:500, whiteSpace:"nowrap" }}>
-              🏚 Street PH Profiles
-            </button>
-            <button onClick={()=>{ onNavigate&&onNavigate("amenities"); setNavOpen(false); }}
-              style={{ background:"#f5f3ff", border:"1px solid #ddd6fe", borderRadius:8, padding:"6px 12px", color:"#7c3aed", cursor:"pointer", fontSize:12, fontWeight:500, whiteSpace:"nowrap" }}>
-              ⭐ Amenities
-            </button>
-            <button onClick={()=>{ onNavigate&&onNavigate("dsr"); setNavOpen(false); }}
-              style={{ background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:8, padding:"6px 12px", color:"#0369a1", cursor:"pointer", fontSize:12, fontWeight:500, whiteSpace:"nowrap" }}>
-              📊 DSR Data
-            </button>
-            <button onClick={()=>{ onNavigate&&onNavigate("checklist"); setNavOpen(false); }}
-              style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:8, padding:"6px 12px", color:"#15803d", cursor:"pointer", fontSize:12, fontWeight:500, whiteSpace:"nowrap" }}>
-              ✅ Checklist
-            </button>
-          </div>
+          {(()=>{
+            const NAV_TABS = [
+              { id:"purchase-costs",  label:"💰 Purchase Costs",   bg:"#f0fdf4", border:"#bbf7d0", color:"#16a34a" },
+              { id:"suburb-profiles", label:"🏘 Suburb Profiles",  bg:"#f0f9ff", border:"#bae6fd", color:"#0369a1" },
+              { id:"street-profiles", label:"🏚 Street PH Profiles",bg:"#fffbeb", border:"#fde68a", color:"#b45309" },
+              { id:"amenities",       label:"⭐ Amenities",         bg:"#f5f3ff", border:"#ddd6fe", color:"#7c3aed" },
+              { id:"dsr",             label:"📊 DSR Data",          bg:"#f0f9ff", border:"#bae6fd", color:"#0369a1" },
+              { id:"checklist",       label:"✅ Checklist",         bg:"#f0fdf4", border:"#bbf7d0", color:"#15803d" },
+            ];
+            const visibleTabs = NAV_TABS.filter(t => isAdmin || guestNav[t.id]);
+            return (
+              <div className={"nav-links" + (navOpen ? " open" : "")} style={{ display:"flex", alignItems:"center", gap:8 }}>
+                {visibleTabs.map(t => (
+                  <button key={t.id} onClick={()=>{ onNavigate&&onNavigate(t.id); setNavOpen(false); }}
+                    style={{ background:t.bg, border:`1px solid ${t.border}`, borderRadius:8, padding:"6px 12px", color:t.color, cursor:"pointer", fontSize:12, fontWeight:500, whiteSpace:"nowrap" }}>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            );
+          })()}
           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            {isAdmin && (
+              <button onClick={()=>setShowNavConfig(true)}
+                style={{ background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:8, padding:"6px 12px", color:"#0369a1", cursor:"pointer", fontSize:12, fontWeight:600 }}>
+                🔒 Guest Access
+              </button>
+            )}
             {isAdmin && (
               <button onClick={()=>setShowAdmin(true)}
                 style={{ background:"#f5f3ff", border:"1px solid #ddd6fe", borderRadius:8, padding:"6px 12px", color:"#7c3aed", cursor:"pointer", fontSize:12, fontWeight:600, display:"flex", alignItems:"center", gap:6, position:"relative" }}>
@@ -1716,6 +1720,68 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
       {showAdmin    && <AdminPanel onClose={()=>setShowAdmin(false)}/>}
       {showQuickAdd && <QuickAddModal onAdd={quickAddProperty} onClose={()=>setShowQuickAdd(false)}/>}
 
+
+      {/* Guest Nav Access Modal */}
+      {showNavConfig && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2000, backdropFilter:"blur(4px)" }}
+          onClick={()=>setShowNavConfig(false)}>
+          <div style={{ background:"#fff", borderRadius:18, width:"min(440px,95vw)", boxShadow:"0 24px 64px rgba(0,0,0,0.18)", fontFamily:"'Inter',sans-serif", overflow:"hidden" }}
+            onClick={e=>e.stopPropagation()}>
+            {/* Header */}
+            <div style={{ padding:"20px 24px 16px", borderBottom:"1px solid #f1f5f9" }}>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                <div>
+                  <div style={{ fontFamily:"'Playfair Display',serif", fontSize:18, fontWeight:700, color:"#0f172a" }}>🔒 Guest Tab Access</div>
+                  <div style={{ fontSize:12, color:"#94a3b8", marginTop:3 }}>Choose which navigation tabs guests can see</div>
+                </div>
+                <button onClick={()=>setShowNavConfig(false)}
+                  style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:8, width:32, height:32, cursor:"pointer", color:"#64748b", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+              </div>
+            </div>
+            {/* Tab toggles */}
+            <div style={{ padding:"8px 0" }}>
+              {[
+                { id:"purchase-costs",  label:"Purchase Costs",    icon:"💰", desc:"Stamp duty and cost calculators" },
+                { id:"suburb-profiles", label:"Suburb Profiles",   icon:"🏘", desc:"Suburb analysis data" },
+                { id:"street-profiles", label:"Street PH Profiles",icon:"🏚", desc:"Street public housing ratings" },
+                { id:"amenities",       label:"Amenities",          icon:"⭐", desc:"Property amenity scoring" },
+                { id:"dsr",             label:"DSR Data",           icon:"📊", desc:"Demand to supply ratio data" },
+                { id:"checklist",       label:"Checklist",          icon:"✅", desc:"Property due diligence checklist" },
+              ].map(tab => {
+                const enabled = guestNav[tab.id] !== false;
+                const toggle = () => {
+                  const updated = { ...guestNav, [tab.id]: !enabled };
+                  setGuestNav(updated);
+                  saveGuestNavAccess(updated);
+                };
+                return (
+                  <div key={tab.id} onClick={toggle}
+                    style={{ display:"flex", alignItems:"center", gap:14, padding:"13px 24px", cursor:"pointer", borderBottom:"1px solid #f8fafc", transition:"background 0.1s" }}
+                    onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"}
+                    onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                    <span style={{ fontSize:20, flexShrink:0 }}>{tab.icon}</span>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:13, fontWeight:600, color:"#0f172a" }}>{tab.label}</div>
+                      <div style={{ fontSize:11, color:"#94a3b8", marginTop:1 }}>{tab.desc}</div>
+                    </div>
+                    {/* Toggle switch */}
+                    <div style={{ width:42, height:24, borderRadius:12, background:enabled?"#0ea5e9":"#e2e8f0", transition:"background 0.2s", flexShrink:0, position:"relative" }}>
+                      <div style={{ position:"absolute", top:3, left: enabled?18:3, width:18, height:18, borderRadius:"50%", background:"#fff", boxShadow:"0 1px 3px rgba(0,0,0,0.15)", transition:"left 0.2s" }}/>
+                    </div>
+                    <span style={{ fontSize:11, fontWeight:700, color:enabled?"#0ea5e9":"#94a3b8", minWidth:24, textAlign:"right" }}>{enabled?"ON":"OFF"}</span>
+                  </div>
+                );
+              })}
+            </div>
+            {/* Footer note */}
+            <div style={{ padding:"14px 24px 18px", background:"#f8fafc", borderTop:"1px solid #f1f5f9" }}>
+              <p style={{ margin:0, fontSize:11, color:"#94a3b8", lineHeight:1.6 }}>
+                ℹ Admins always see all tabs regardless of these settings. Changes take effect immediately for all guest users.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Reset Dashboard Confirm Modal */}
       {showResetConfirm && (
         <div style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2000, backdropFilter:"blur(4px)" }}>

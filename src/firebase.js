@@ -202,3 +202,22 @@ export async function clearUserDashboard(uid) {
     deleteDoc(userDoc(uid, "tracker_cols")),
   ]);
 }
+
+// ── Guest nav access config ───────────────────────────────────────────────────
+export const DEFAULT_GUEST_NAV = {
+  "purchase-costs":  true,
+  "suburb-profiles": true,
+  "street-profiles": true,
+  "amenities":       true,
+  "dsr":             true,
+  "checklist":       true,
+};
+
+export async function loadGuestNavAccess() {
+  const snap = await getDoc(sharedDoc("guest_nav_access"));
+  return snap.exists() ? { ...DEFAULT_GUEST_NAV, ...snap.data() } : DEFAULT_GUEST_NAV;
+}
+
+export async function saveGuestNavAccess(config) {
+  await setDoc(sharedDoc("guest_nav_access"), config);
+}
