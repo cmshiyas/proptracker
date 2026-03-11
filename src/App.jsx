@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { auth, signOutUser, getApprovedUser, submitAccessRequest } from "./firebase.js";
+import { auth, signOutUser, getApprovedUser, submitAccessRequest, loadSubscriptionNav, DEFAULT_SUBSCRIPTION_NAV } from "./firebase.js";
 import { onAuthStateChanged } from "firebase/auth";
 import AuthScreen    from "./components/AuthScreen.jsx";
 import PendingScreen from "./components/PendingScreen.jsx";
@@ -26,9 +26,11 @@ function Spinner() {
 }
 
 export default function App() {
-  const [user,   setUser]   = useState(undefined);
-  const [access, setAccess] = useState("checking");
-  const [page,   setPage]   = useState("dashboard"); // dashboard | purchase-costs
+  const [user,         setUser]         = useState(undefined);
+  const [access,       setAccess]       = useState("checking");
+  const [page,         setPage]         = useState("dashboard");
+  const [subscription, setSubscription] = useState("guest");
+  const [subNav,       setSubNav]       = useState(DEFAULT_SUBSCRIPTION_NAV);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, u => setUser(u ?? null));
@@ -39,9 +41,14 @@ export default function App() {
     if (!user) { setAccess("checking"); return; }
     if (user.email === ADMIN_EMAIL) { setAccess("approved"); return; }
     getApprovedUser(user.email).then(r => {
-      if (r) setAccess("approved");
-      else   submitAccessRequest(user).then(() => setAccess("pending"));
+      if (r) {
+        setAccess("approved");
+        setSubscription(r.subscription || "guest");
+      } else {
+        submitAccessRequest(user).then(() => setAccess("pending"));
+      }
     });
+    loadSubscriptionNav().then(nav => setSubNav(nav));
   }, [user]);
 
   if (user === undefined)    return <Spinner />;
@@ -56,12 +63,18 @@ export default function App() {
   if (page === "dsr")                return <DsrData         onBack={() => setPage("dashboard")} isAdmin={user.email === ADMIN_EMAIL} />;
   if (page === "checklist")          return <PropertyChecklist onBack={() => setPage("dashboard")} user={user} />;
 
+  const isAdmin = user.email === ADMIN_EMAIL;
+
   return (
     <PropertyTracker
       user={user}
       onSignOut={signOutUser}
-      isAdmin={user.email === ADMIN_EMAIL}
+      isAdmin={isAdmin}
       onNavigate={setPage}
+      subscription={isAdmin ? "platinum" : subscription}
+      subNav={subNav}
+      onSubNavChange={setSubNav}
+      onSubscriptionChange={setSubscription}
     />
   );
 }
