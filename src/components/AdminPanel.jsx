@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { approveUser, denyRequest, revokeUser, updateUserAccessType } from "../firebase.js";
+import { approveUser, denyRequest, revokeUser, updateUserAccessType, setUserSubscription } from "../firebase.js";
 import { getFirestore, collection, onSnapshot } from "firebase/firestore";
 
 const db = getFirestore();
@@ -8,6 +8,21 @@ const ACCESS_TYPES = [
   { value: "guest",  label: "Guest",  color: "#0369a1", bg: "#f0f9ff", border: "#bae6fd" },
   { value: "admin",  label: "Admin",  color: "#7c3aed", bg: "#f5f3ff", border: "#ddd6fe" },
 ];
+
+const SUB_TIERS = [
+  { value: "guest",    icon:"👤", label: "Guest",    color:"#64748b", bg:"#f8fafc",  border:"#e2e8f0" },
+  { value: "silver",   icon:"🥈", label: "Silver",   color:"#475569", bg:"#f1f5f9",  border:"#cbd5e1" },
+  { value: "platinum", icon:"💎", label: "Platinum", color:"#0369a1", bg:"#e0f2fe",  border:"#7dd3fc" },
+];
+
+function SubBadge({ tier }) {
+  const t = SUB_TIERS.find(s => s.value === tier) || SUB_TIERS[0];
+  return (
+    <span style={{ background:t.bg, border:`1px solid ${t.border}`, borderRadius:20, padding:"3px 10px", color:t.color, fontSize:11, fontWeight:700, whiteSpace:"nowrap", display:"inline-flex", alignItems:"center", gap:4 }}>
+      {t.icon} {t.label}
+    </span>
+  );
+}
 
 function AccessBadge({ type }) {
   const t = ACCESS_TYPES.find(a => a.value === type) || ACCESS_TYPES[0];
@@ -56,6 +71,9 @@ export default function AdminPanel({ onClose }) {
   const handleChangeType = async (u, newType) => {
     await updateUserAccessType(u.email, newType);
   };
+  const handleSetSubscription = async (u, tier) => {
+    await setUserSubscription(u.email, tier);
+  };
 
   const tabs = [
     { id: "users",   label: `Users (${approved.length})` },
@@ -100,13 +118,14 @@ export default function AdminPanel({ onClose }) {
           ) : tab === "users" ? (
             <>
               {/* Legend */}
-              <div style={{ display:"flex", gap:10, marginBottom:16, flexWrap:"wrap" }}>
-                {ACCESS_TYPES.map(t => (
-                  <div key={t.value} style={{ display:"flex", alignItems:"center", gap:6 }}>
-                    <AccessBadge type={t.value} />
-                    <span style={{ fontSize:11, color:"#94a3b8" }}>{t.value === "guest" ? "Read & edit own data" : "Full admin access"}</span>
+              <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap" }}>
+                {SUB_TIERS.map(t => (
+                  <div key={t.value} style={{ display:"flex", alignItems:"center", gap:6, background:t.bg, border:`1px solid ${t.border}`, borderRadius:8, padding:"5px 10px" }}>
+                    <span style={{ fontSize:14 }}>{t.icon}</span>
+                    <span style={{ fontSize:11, fontWeight:700, color:t.color }}>{t.label}</span>
                   </div>
                 ))}
+                <span style={{ fontSize:11, color:"#94a3b8", alignSelf:"center" }}>— Use 🏅 Subscriptions to configure tab access per tier</span>
               </div>
 
               {approved.length === 0 ? (
@@ -125,23 +144,41 @@ export default function AdminPanel({ onClose }) {
                         Approved {u.approvedAt ? new Date(u.approvedAt).toLocaleDateString("en-AU", { day:"numeric", month:"short", year:"numeric" }) : "—"}
                       </div>
                     </div>
-                    <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
-                      {/* Access type selector */}
-                      <select
-                        value={u.accessType || "guest"}
-                        onChange={e => handleChangeType(u, e.target.value)}
-                        style={{
-                          border: `1px solid ${ACCESS_TYPES.find(a => a.value === (u.accessType||"guest"))?.border || "#bae6fd"}`,
-                          background: ACCESS_TYPES.find(a => a.value === (u.accessType||"guest"))?.bg || "#f0f9ff",
-                          color: ACCESS_TYPES.find(a => a.value === (u.accessType||"guest"))?.color || "#0369a1",
-                          borderRadius:20, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer", outline:"none",
-                        }}>
-                        {ACCESS_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                      </select>
-                      <button onClick={() => setConfirmRevoke(u)}
-                        style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:6, padding:"5px 12px", color:"#dc2626", cursor:"pointer", fontSize:12, fontWeight:500, whiteSpace:"nowrap" }}>
-                        Remove Access
-                      </button>
+                    <div style={{ display:"flex", flexDirection:"column", gap:8, alignItems:"flex-end" }}>
+                      <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+                        {/* Subscription tier */}
+                        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                          <span style={{ fontSize:11, color:"#94a3b8", whiteSpace:"nowrap" }}>Subscription:</span>
+                          <select
+                            value={u.subscription || "guest"}
+                            onChange={e => handleSetSubscription(u, e.target.value)}
+                            style={{
+                              border:`1px solid ${SUB_TIERS.find(s=>s.value===(u.subscription||"guest"))?.border||"#e2e8f0"}`,
+                              background:SUB_TIERS.find(s=>s.value===(u.subscription||"guest"))?.bg||"#f8fafc",
+                              color:SUB_TIERS.find(s=>s.value===(u.subscription||"guest"))?.color||"#64748b",
+                              borderRadius:20, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer", outline:"none",
+                            }}>
+                            {SUB_TIERS.map(t => <option key={t.value} value={t.value}>{t.icon} {t.label}</option>)}
+                          </select>
+                        </div>
+                        {/* Access type */}
+                        <select
+                          value={u.accessType || "guest"}
+                          onChange={e => handleChangeType(u, e.target.value)}
+                          style={{
+                            border:`1px solid ${ACCESS_TYPES.find(a=>a.value===(u.accessType||"guest"))?.border||"#bae6fd"}`,
+                            background:ACCESS_TYPES.find(a=>a.value===(u.accessType||"guest"))?.bg||"#f0f9ff",
+                            color:ACCESS_TYPES.find(a=>a.value===(u.accessType||"guest"))?.color||"#0369a1",
+                            borderRadius:20, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer", outline:"none",
+                          }}>
+                          {ACCESS_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                        </select>
+                        <button onClick={() => setConfirmRevoke(u)}
+                          style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:6, padding:"5px 12px", color:"#dc2626", cursor:"pointer", fontSize:12, fontWeight:500, whiteSpace:"nowrap" }}>
+                          Remove
+                        </button>
+                      </div>
+                      <SubBadge tier={u.subscription||"guest"} />
                     </div>
                   </div>
                 ))

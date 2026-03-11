@@ -221,3 +221,61 @@ export async function loadGuestNavAccess() {
 export async function saveGuestNavAccess(config) {
   await setDoc(sharedDoc("guest_nav_access"), config);
 }
+
+// ── Subscription tier config ───────────────────────────────────────────────────
+export const SUBSCRIPTION_TIERS = ["guest", "silver", "platinum"];
+
+export const DEFAULT_SUBSCRIPTION_NAV = {
+  guest:    { "purchase-costs":true, "suburb-profiles":false, "street-profiles":false, "amenities":true,  "dsr":false, "checklist":true  },
+  silver:   { "purchase-costs":true, "suburb-profiles":true,  "street-profiles":true,  "amenities":true,  "dsr":false, "checklist":true  },
+  platinum: { "purchase-costs":true, "suburb-profiles":true,  "street-profiles":true,  "amenities":true,  "dsr":true,  "checklist":true  },
+};
+
+export async function loadSubscriptionNav() {
+  const snap = await getDoc(sharedDoc("subscription_nav"));
+  if (!snap.exists()) return DEFAULT_SUBSCRIPTION_NAV;
+  const data = snap.data();
+  return {
+    guest:    { ...DEFAULT_SUBSCRIPTION_NAV.guest,    ...(data.guest    || {}) },
+    silver:   { ...DEFAULT_SUBSCRIPTION_NAV.silver,   ...(data.silver   || {}) },
+    platinum: { ...DEFAULT_SUBSCRIPTION_NAV.platinum, ...(data.platinum || {}) },
+  };
+}
+
+export async function saveSubscriptionNav(config) {
+  await setDoc(sharedDoc("subscription_nav"), config);
+}
+
+export async function setUserSubscription(email, subscription) {
+  const snap = await getDoc(doc(db, "approved_users", email));
+  if (snap.exists()) {
+    await setDoc(doc(db, "approved_users", email), { ...snap.data(), subscription });
+  }
+}
+
+// ── Published properties (admin → guests) ─────────────────────────────────────
+export async function publishProperty(row) {
+  // Store under shared/published_properties as a map keyed by row id
+  const snap = await getDoc(sharedDoc("published_properties"));
+  const existing = snap.exists() ? (snap.data().rows || []) : [];
+  // Replace if already exists, otherwise append
+  const updated = existing.some(r => r.id === row.id)
+    ? existing.map(r => r.id === row.id ? { ...row, publishedAt: Date.now() } : r)
+    : [...existing, { ...row, publishedAt: Date.now() }];
+  await setDoc(sharedDoc("published_properties"), { rows: updated, updatedAt: Date.now() });
+}
+
+export async function unpublishProperty(rowId) {
+  const snap = await getDoc(sharedDoc("published_properties"));
+  if (!snap.exists()) return;
+  const existing = snap.data().rows || [];
+  await setDoc(sharedDoc("published_properties"), {
+    rows: existing.filter(r => r.id !== rowId),
+    updatedAt: Date.now()
+  });
+}
+
+export async function loadPublishedProperties() {
+  const snap = await getDoc(sharedDoc("published_properties"));
+  return snap.exists() ? (snap.data().rows || []) : [];
+}

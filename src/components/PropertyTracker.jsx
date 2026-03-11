@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import { loadTrackerData, saveTrackerRows, saveTrackerCols, loadUserTrackerData, saveUserTrackerRows, saveUserTrackerCols, clearUserDashboard, loadPurchaseCosts, onPendingCountChange, loadStreetProfiles, loadAmenities, DEFAULT_AMENITIES, loadUserAmenitiesSelections, saveUserAmenitiesSelections, loadUserAmenitiesConfig, loadGuestNavAccess, saveGuestNavAccess, DEFAULT_GUEST_NAV } from "../firebase.js";
+import { loadTrackerData, saveTrackerRows, saveTrackerCols, loadUserTrackerData, saveUserTrackerRows, saveUserTrackerCols, clearUserDashboard, loadPurchaseCosts, onPendingCountChange, loadStreetProfiles, loadAmenities, DEFAULT_AMENITIES, loadUserAmenitiesSelections, saveUserAmenitiesSelections, loadUserAmenitiesConfig, loadGuestNavAccess, saveGuestNavAccess, DEFAULT_GUEST_NAV, saveSubscriptionNav, SUBSCRIPTION_TIERS, DEFAULT_SUBSCRIPTION_NAV, publishProperty, unpublishProperty, loadPublishedProperties } from "../firebase.js";
 import { calcStampDuty, formatCurrency } from "../stampDuty.js";
 import AdminPanel from "./AdminPanel.jsx";
 import HelpPanel  from "./HelpPanel.jsx";
@@ -1126,7 +1126,7 @@ function calcCostAndYield(row, pc) {
   };
 }
 
-export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }) {
+export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate, subscription="guest", subNav=DEFAULT_SUBSCRIPTION_NAV, onSubNavChange, onSubscriptionChange }) {
   const [columns,      setColumns]      = useState(MANDATORY_COLUMNS);
   const [rows,         setRows]         = useState(INITIAL_ROWS);
   const [editing,      setEditing]      = useState(null);
@@ -1142,7 +1142,8 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
   const [saveError,      setSaveError]      = useState("");
   const [dupAlert,       setDupAlert]       = useState("");
   const [showResetConfirm, setShowResetConfirm] = useState(false);
-  const [guestNav,        setGuestNav]        = useState(DEFAULT_GUEST_NAV);
+  const [publishedIds,    setPublishedIds]    = useState(new Set()); // row ids admin has published
+  const [publishingIds,   setPublishingIds]   = useState(new Set()); // loading state per row
   const [showNavConfig,   setShowNavConfig]   = useState(false);
   const [dragColId,      setDragColId]      = useState(null); // column being dragged
   const [dragOverColId,  setDragOverColId]  = useState(null); // column being hovered over
@@ -1191,18 +1192,27 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
     };
     initTracker();
     loadPurchaseCosts().then(d => { if(d) { setPurchaseCosts(d); purchaseCostsRef.current = d; } });
-    loadGuestNavAccess().then(d => setGuestNav(d));
+
     loadStreetProfiles().then(d => setStreetProfiles(d));
+    // Load publish state
+    loadPublishedProperties().then(rows => {
+      setPublishedIds(new Set(rows.map(r => r.id)));
+      // Non-admin: merge published rows into their view (read-only mode)
+      if (!isAdmin) {
+        setRows(rows.map(r => ({ ...r, _published: true })));
+      }
+    });
     // Load user's own amenities config; fall back to shared admin list, then hardcoded defaults
     Promise.all([loadAmenities(), loadUserAmenitiesConfig(user.uid)]).then(([shared, userCfg]) => {
       const master = shared.length > 0 ? shared : DEFAULT_AMENITIES;
       setAmenitiesCfg(userCfg && userCfg.length > 0 ? userCfg : master);
     });
     loadUserAmenitiesSelections(user.uid).then(sel => setUserAmenSel(sel || {}));
-    // Real-time listener for pending access requests
+    // Real-time listener for pending access requests — admin only
+    if (!isAdmin) return () => {};
     const unsubPending = onPendingCountChange(count => setPendingCount(count));
     return () => unsubPending();
-  },[]);
+  },[isAdmin]);
 
   const saveRows     = useCallback(async (nr)=>{ 
     setRows(nr); setSaving(true); 
@@ -1315,7 +1325,31 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
     });
   };
 
-  const analyseSuburb = async (rowId) => {
+  // ── Publish / Unpublish ─────────────────────────────────────────────────────
+  const handlePublish = async (row) => {
+    setPublishingIds(prev => new Set([...prev, row.id]));
+    try {
+      await publishProperty(row);
+      setPublishedIds(prev => new Set([...prev, row.id]));
+      // Mark row as published in admin's own data
+      const updated = rows.map(r => r.id === row.id ? { ...r, published: true } : r);
+      await saveRows(updated);
+    } catch(e) { console.error("publish error", e); }
+    setPublishingIds(prev => { const s = new Set(prev); s.delete(row.id); return s; });
+  };
+
+  const handleUnpublish = async (rowId) => {
+    setPublishingIds(prev => new Set([...prev, rowId]));
+    try {
+      await unpublishProperty(rowId);
+      setPublishedIds(prev => { const s = new Set(prev); s.delete(rowId); return s; });
+      const updated = rows.map(r => r.id === rowId ? { ...r, published: false } : r);
+      await saveRows(updated);
+    } catch(e) { console.error("unpublish error", e); }
+    setPublishingIds(prev => { const s = new Set(prev); s.delete(rowId); return s; });
+  };
+
+    const analyseSuburb = async (rowId) => {
     const row = rows.find(r => r.id === rowId);
     if (!row || !row.suburb) return;
     setAnalysingRows(prev => new Set([...prev, rowId]));
@@ -1454,7 +1488,8 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
               { id:"dsr",             label:"📊 DSR Data",          bg:"#f0f9ff", border:"#bae6fd", color:"#0369a1" },
               { id:"checklist",       label:"✅ Checklist",         bg:"#f0fdf4", border:"#bbf7d0", color:"#15803d" },
             ];
-            const visibleTabs = NAV_TABS.filter(t => isAdmin || guestNav[t.id]);
+            const tierAccess = subNav[subscription] || subNav["guest"] || {};
+            const visibleTabs = NAV_TABS.filter(t => isAdmin || tierAccess[t.id]);
             return (
               <div className={"nav-links" + (navOpen ? " open" : "")} style={{ display:"flex", alignItems:"center", gap:8 }}>
                 {visibleTabs.map(t => (
@@ -1469,8 +1504,8 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
             {isAdmin && (
               <button onClick={()=>setShowNavConfig(true)}
-                style={{ background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:8, padding:"6px 12px", color:"#0369a1", cursor:"pointer", fontSize:12, fontWeight:600 }}>
-                🔒 Guest Access
+                style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:8, padding:"6px 12px", color:"#475569", cursor:"pointer", fontSize:12, fontWeight:600 }}>
+                🏅 Subscriptions
               </button>
             )}
             {isAdmin && (
@@ -1492,7 +1527,14 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
             <div className="user-chip" style={{ display:"flex", alignItems:"center", gap:6, background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:24, padding:"4px 10px 4px 5px" }}>
               {user.photoURL && <img src={user.photoURL} alt="" style={{ width:24, height:24, borderRadius:"50%", objectFit:"cover" }}/>}
               <span className="name" style={{ color:"#374151", fontSize:12, fontWeight:500, maxWidth:120, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{user.displayName||user.email}</span>
-              {isAdmin && <span style={{ background:"#7c3aed", borderRadius:10, padding:"1px 7px", fontSize:10, color:"#fff", fontWeight:700 }}>ADMIN</span>}
+              {isAdmin
+                ? <span style={{ background:"#7c3aed", borderRadius:10, padding:"1px 7px", fontSize:10, color:"#fff", fontWeight:700 }}>ADMIN</span>
+                : subscription === "platinum"
+                  ? <span style={{ background:"#0ea5e9", borderRadius:10, padding:"1px 7px", fontSize:10, color:"#fff", fontWeight:700 }}>💎 PLATINUM</span>
+                  : subscription === "silver"
+                  ? <span style={{ background:"#64748b", borderRadius:10, padding:"1px 7px", fontSize:10, color:"#fff", fontWeight:700 }}>🥈 SILVER</span>
+                  : null
+              }
             </div>
             <button onClick={onSignOut} style={{ background:"transparent", border:"1px solid #e2e8f0", borderRadius:8, padding:"6px 10px", color:"#94a3b8", cursor:"pointer", fontSize:12 }}>
               Out
@@ -1561,14 +1603,48 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
         {/* Grid */}
         {(()=>{
           // Helper: render a set of rows
-          const renderRows = (rowSet) => rowSet.map((row,idx)=>(
+          const renderRows = (rowSet) => rowSet.map((row,idx)=>{
+            const isPublished   = publishedIds.has(row.id) || row.published === true || row._published === true;
+            const isPublishing  = publishingIds.has(row.id);
+            const cellReadonly  = !isAdmin || isPublished; // non-admins always readonly; published rows locked for admin too
+
+            return (
             <div key={row.id} className="rh"
-              style={{ display:"flex", background:idx%2===0?"#fff":"#fafbfc", borderBottom:"1px solid #f1f5f9" }}>
-              <div style={{ width:52, minWidth:52, display:"flex", alignItems:"center", justifyContent:"center", borderRight:"1px solid #e2e8f0", background:"inherit" }}>
-                <input type="checkbox" style={{ accentColor:"#0ea5e9", cursor:"pointer", width:15, height:15 }}
-                  checked={selectedRows.has(row.id)}
-                  onChange={e=>{ const s=new Set(selectedRows); e.target.checked?s.add(row.id):s.delete(row.id); setSelectedRows(s); }}/>
+              style={{ display:"flex", background: isPublished ? (idx%2===0?"#f0fdf4":"#ecfdf5") : (idx%2===0?"#fff":"#fafbfc"), borderBottom:"1px solid #f1f5f9", position:"relative" }}>
+
+              {/* Checkbox + Publish button column */}
+              <div style={{ width:52, minWidth:52, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:4, borderRight:"1px solid #e2e8f0", background:"inherit", padding:"4px 0" }}>
+                {isAdmin ? (
+                  <>
+                    <input type="checkbox" style={{ accentColor:"#0ea5e9", cursor:"pointer", width:15, height:15 }}
+                      checked={selectedRows.has(row.id)}
+                      onChange={e=>{ const s=new Set(selectedRows); e.target.checked?s.add(row.id):s.delete(row.id); setSelectedRows(s); }}/>
+                    {isPublished ? (
+                      <button
+                        onClick={() => handleUnpublish(row.id)}
+                        disabled={isPublishing}
+                        title="Unpublish this property"
+                        style={{ background:"#dcfce7", border:"1px solid #86efac", borderRadius:5, padding:"2px 5px", cursor:isPublishing?"default":"pointer", fontSize:9, fontWeight:700, color:"#15803d", lineHeight:1.3, whiteSpace:"nowrap", opacity:isPublishing?0.6:1 }}>
+                        {isPublishing ? "…" : "✓ Live"}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handlePublish(row)}
+                        disabled={isPublishing}
+                        title="Publish to all users"
+                        style={{ background:"#eff6ff", border:"1px solid #93c5fd", borderRadius:5, padding:"2px 5px", cursor:isPublishing?"default":"pointer", fontSize:9, fontWeight:700, color:"#1d4ed8", lineHeight:1.3, whiteSpace:"nowrap", opacity:isPublishing?0.6:1 }}>
+                        {isPublishing ? "…" : "📢 Pub"}
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:2 }}>
+                    <span style={{ fontSize:12 }}>🔒</span>
+                    <span style={{ fontSize:8, color:"#86efac", fontWeight:700 }}>LIVE</span>
+                  </div>
+                )}
               </div>
+
               {columns.map(col=>{
                 const userSelForRow = userAmenSel[String(row.id)] || [];
                 const enrichedCol = col.type==="calc_ph"
@@ -1578,22 +1654,30 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
                   : col.type==="score_card"
                   ? { ...col, _amenitiesCfg: amenitiesCfg, _rowAmenities: userSelForRow }
                   : col;
-                const handleCellChange = col.type==="amenities"
-                  ? (next) => setUserAmenSel(prev => ({ ...prev, [String(row.id)]: next }))
-                  : col.type==="score_card"
+                const handleCellChange = (cellReadonly || col.type==="score_card")
                   ? () => {}
+                  : col.type==="amenities"
+                  ? (next) => setUserAmenSel(prev => ({ ...prev, [String(row.id)]: next }))
                   : (v) => updateCell(row.id, col.id, v);
                 return (
                   <Cell key={col.id} col={enrichedCol} value={row[col.id]}
                     onChange={handleCellChange}
-                    editing={editing?.rowId===row.id&&editing?.colId===col.id}
-                    onStartEdit={()=>setEditing({rowId:row.id,colId:col.id})}
+                    editing={!cellReadonly && editing?.rowId===row.id&&editing?.colId===col.id}
+                    onStartEdit={cellReadonly ? ()=>{} : ()=>setEditing({rowId:row.id,colId:col.id})}
                     onEndEdit={()=>setEditing(null)}
-                    onAnalyse={null} analysing={false} readonly={false}/>
+                    onAnalyse={null} analysing={false} readonly={cellReadonly}/>
                 );
               })}
+
+              {/* Published overlay stripe */}
+              {isPublished && (
+                <div style={{ position:"absolute", top:0, right:0, background:"#22c55e", color:"#fff", fontSize:8, fontWeight:800, padding:"2px 6px", borderBottomLeftRadius:6, letterSpacing:0.5, pointerEvents:"none" }}>
+                  PUBLISHED
+                </div>
+              )}
             </div>
-          ));
+            );
+          });
 
           // Helper: render column headers (called as fn so no duplicate React key issue)
           const ColHeaders = ({sectionKey}) => (
@@ -1646,7 +1730,7 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
             </div>
           );
 
-          const addRowFooter = (
+          const addRowFooter = isAdmin ? (
             <div onClick={addRow}
               style={{ display:"flex", height:44, cursor:"pointer", borderTop:"1px solid #f1f5f9", background:"#fafbfc" }}
               onMouseEnter={e=>e.currentTarget.style.background="#f1f5f9"}
@@ -1654,11 +1738,41 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
               <div style={{ width:52, minWidth:52, borderRight:"1px solid #e2e8f0", display:"flex", alignItems:"center", justifyContent:"center", color:"#94a3b8", fontSize:20 }}>+</div>
               <div style={{ flex:1, display:"flex", alignItems:"center", padding:"0 12px", color:"#94a3b8", fontSize:13 }}>Click to add a new row...</div>
             </div>
-          );
+          ) : null;
 
           const considering = sortRows(rows.filter(r => !r.status || r.status === "Under Consideration"));
           const passed      = sortRows(rows.filter(r => r.status === "Analysed & Passed"));
           const offeredMissed = sortRows(rows.filter(r => r.status === "Offered & Missed"));
+
+          // Non-admin: show only published properties (read-only)
+          if (!isAdmin) {
+            const published = sortRows(rows.filter(r => r._published));
+            return (
+              <div className="grid-wrap" style={{ overflowX:"auto", padding:"16px 12px 40px" }}>
+                <div style={{ minWidth:totalWidth }}>
+                  <div style={{ marginBottom:24 }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:10, padding:"0 4px 10px" }}>
+                      <div style={{ width:10, height:10, borderRadius:"50%", background:"#22c55e", flexShrink:0 }}/>
+                      <span style={{ fontSize:13, fontWeight:700, color:"#15803d", textTransform:"uppercase", letterSpacing:1 }}>Published Properties</span>
+                      <span style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:20, padding:"1px 10px", fontSize:11, fontWeight:700, color:"#15803d" }}>{published.length}</span>
+                      <span style={{ fontSize:11, color:"#94a3b8" }}>— read only, updated by admin</span>
+                    </div>
+                    <div style={{ background:"#fff", border:"1px solid #bbf7d0", borderRadius:12, overflow:"hidden", boxShadow:"0 1px 4px rgba(34,197,94,0.08)" }}>
+                      <ColHeaders sectionKey="published" />
+                      {published.length === 0
+                        ? <div style={{ padding:"40px 20px", textAlign:"center" }}>
+                            <div style={{ fontSize:36, marginBottom:12 }}>📋</div>
+                            <div style={{ color:"#64748b", fontSize:14, fontWeight:600 }}>No properties published yet</div>
+                            <div style={{ color:"#94a3b8", fontSize:12, marginTop:6 }}>The admin will publish properties here for you to review.</div>
+                          </div>
+                        : renderRows(published)
+                      }
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          }
 
           return (
             <div className="grid-wrap" style={{ overflowX:"auto", padding:"16px 12px 40px" }}>
@@ -1729,67 +1843,98 @@ export default function PropertyTracker({ user, onSignOut, isAdmin, onNavigate }
       {showQuickAdd && <QuickAddModal onAdd={quickAddProperty} onClose={()=>setShowQuickAdd(false)}/>}
 
 
-      {/* Guest Nav Access Modal */}
+      {/* Subscription & Nav Access Modal */}
       {showNavConfig && (
-        <div style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2000, backdropFilter:"blur(4px)" }}
+        <div style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.6)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2000, backdropFilter:"blur(4px)" }}
           onClick={()=>setShowNavConfig(false)}>
-          <div style={{ background:"#fff", borderRadius:18, width:"min(440px,95vw)", boxShadow:"0 24px 64px rgba(0,0,0,0.18)", fontFamily:"'Inter',sans-serif", overflow:"hidden" }}
+          <div style={{ background:"#fff", borderRadius:18, width:"min(680px,97vw)", maxHeight:"90vh", boxShadow:"0 24px 64px rgba(0,0,0,0.2)", fontFamily:"'Inter',sans-serif", overflow:"hidden", display:"flex", flexDirection:"column" }}
             onClick={e=>e.stopPropagation()}>
+
             {/* Header */}
-            <div style={{ padding:"20px 24px 16px", borderBottom:"1px solid #f1f5f9" }}>
+            <div style={{ padding:"20px 24px 16px", background:"linear-gradient(135deg,#0f172a,#1e293b)", flexShrink:0 }}>
               <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                 <div>
-                  <div style={{ fontFamily:"'Playfair Display',serif", fontSize:18, fontWeight:700, color:"#0f172a" }}>🔒 Guest Tab Access</div>
-                  <div style={{ fontSize:12, color:"#94a3b8", marginTop:3 }}>Choose which navigation tabs guests can see</div>
+                  <div style={{ fontFamily:"'Playfair Display',serif", fontSize:18, fontWeight:700, color:"#fff" }}>🏅 Subscription Management</div>
+                  <div style={{ fontSize:12, color:"#94a3b8", marginTop:3 }}>Configure tab access per subscription tier</div>
                 </div>
                 <button onClick={()=>setShowNavConfig(false)}
-                  style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:8, width:32, height:32, cursor:"pointer", color:"#64748b", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+                  style={{ background:"rgba(255,255,255,0.1)", border:"1px solid rgba(255,255,255,0.15)", borderRadius:8, width:32, height:32, cursor:"pointer", color:"#94a3b8", fontSize:15, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+              </div>
+
+              {/* Tier legend */}
+              <div style={{ display:"flex", gap:10, marginTop:14 }}>
+                {[
+                  { tier:"guest",    icon:"👤", label:"Guest",    color:"#64748b", bg:"rgba(100,116,139,0.15)", border:"rgba(100,116,139,0.3)" },
+                  { tier:"silver",   icon:"🥈", label:"Silver",   color:"#94a3b8", bg:"rgba(148,163,184,0.15)", border:"rgba(148,163,184,0.4)" },
+                  { tier:"platinum", icon:"💎", label:"Platinum", color:"#67e8f9", bg:"rgba(103,232,249,0.15)", border:"rgba(103,232,249,0.3)" },
+                ].map(t => (
+                  <div key={t.tier} style={{ flex:1, background:t.bg, border:`1px solid ${t.border}`, borderRadius:10, padding:"8px 12px", textAlign:"center" }}>
+                    <div style={{ fontSize:16 }}>{t.icon}</div>
+                    <div style={{ fontSize:12, fontWeight:700, color:t.color, marginTop:2 }}>{t.label}</div>
+                  </div>
+                ))}
               </div>
             </div>
-            {/* Tab toggles */}
-            <div style={{ padding:"8px 0" }}>
+
+            {/* Tab access grid */}
+            <div style={{ overflowY:"auto", flex:1 }}>
+              {/* Column headers */}
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 110px 110px 110px", padding:"12px 24px 8px", borderBottom:"1px solid #f1f5f9", background:"#f8fafc", position:"sticky", top:0 }}>
+                <span style={{ fontSize:11, fontWeight:700, color:"#64748b", textTransform:"uppercase", letterSpacing:1 }}>Tab</span>
+                {[{icon:"👤",label:"Guest"},{icon:"🥈",label:"Silver"},{icon:"💎",label:"Platinum"}].map(t=>(
+                  <span key={t.label} style={{ fontSize:11, fontWeight:700, color:"#64748b", textTransform:"uppercase", letterSpacing:1, textAlign:"center" }}>{t.icon} {t.label}</span>
+                ))}
+              </div>
+
               {[
                 { id:"purchase-costs",  label:"Purchase Costs",    icon:"💰", desc:"Stamp duty and cost calculators" },
-                { id:"suburb-profiles", label:"Suburb Profiles",   icon:"🏘", desc:"Suburb analysis data" },
-                { id:"street-profiles", label:"Street PH Profiles",icon:"🏚", desc:"Street public housing ratings" },
-                { id:"amenities",       label:"Amenities",          icon:"⭐", desc:"Property amenity scoring" },
-                { id:"dsr",             label:"DSR Data",           icon:"📊", desc:"Demand to supply ratio data" },
-                { id:"checklist",       label:"Checklist",          icon:"✅", desc:"Property due diligence checklist" },
-              ].map(tab => {
-                const enabled = guestNav[tab.id] !== false;
-                const toggle = () => {
-                  const updated = { ...guestNav, [tab.id]: !enabled };
-                  setGuestNav(updated);
-                  saveGuestNavAccess(updated);
-                };
-                return (
-                  <div key={tab.id} onClick={toggle}
-                    style={{ display:"flex", alignItems:"center", gap:14, padding:"13px 24px", cursor:"pointer", borderBottom:"1px solid #f8fafc", transition:"background 0.1s" }}
-                    onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"}
-                    onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                    <span style={{ fontSize:20, flexShrink:0 }}>{tab.icon}</span>
-                    <div style={{ flex:1, minWidth:0 }}>
+                { id:"suburb-profiles", label:"Suburb Profiles",   icon:"🏘", desc:"Suburb research notes" },
+                { id:"street-profiles", label:"Street PH Profiles",icon:"🏚", desc:"Street PH ratings" },
+                { id:"amenities",       label:"Amenities",          icon:"⭐", desc:"Amenity scoring" },
+                { id:"dsr",             label:"DSR Data",           icon:"📊", desc:"Demand to supply ratio" },
+                { id:"checklist",       label:"Checklist",          icon:"✅", desc:"Due diligence checklist" },
+              ].map((tab, idx) => (
+                <div key={tab.id} style={{ display:"grid", gridTemplateColumns:"1fr 110px 110px 110px", padding:"13px 24px", borderBottom:"1px solid #f8fafc", background:idx%2===0?"#fff":"#fafbfc" }}
+                  onMouseEnter={e=>e.currentTarget.style.background="#f0f9ff"}
+                  onMouseLeave={e=>e.currentTarget.style.background=idx%2===0?"#fff":"#fafbfc"}>
+                  <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                    <span style={{ fontSize:18 }}>{tab.icon}</span>
+                    <div>
                       <div style={{ fontSize:13, fontWeight:600, color:"#0f172a" }}>{tab.label}</div>
-                      <div style={{ fontSize:11, color:"#94a3b8", marginTop:1 }}>{tab.desc}</div>
+                      <div style={{ fontSize:11, color:"#94a3b8" }}>{tab.desc}</div>
                     </div>
-                    {/* Toggle switch */}
-                    <div style={{ width:42, height:24, borderRadius:12, background:enabled?"#0ea5e9":"#e2e8f0", transition:"background 0.2s", flexShrink:0, position:"relative" }}>
-                      <div style={{ position:"absolute", top:3, left: enabled?18:3, width:18, height:18, borderRadius:"50%", background:"#fff", boxShadow:"0 1px 3px rgba(0,0,0,0.15)", transition:"left 0.2s" }}/>
-                    </div>
-                    <span style={{ fontSize:11, fontWeight:700, color:enabled?"#0ea5e9":"#94a3b8", minWidth:24, textAlign:"right" }}>{enabled?"ON":"OFF"}</span>
                   </div>
-                );
-              })}
+                  {["guest","silver","platinum"].map(tier => {
+                    const enabled = (subNav[tier] || {})[tab.id] !== false;
+                    const toggle = () => {
+                      const updated = {
+                        ...subNav,
+                        [tier]: { ...(subNav[tier]||{}), [tab.id]: !enabled }
+                      };
+                      onSubNavChange && onSubNavChange(updated);
+                      saveSubscriptionNav(updated);
+                    };
+                    return (
+                      <div key={tier} style={{ display:"flex", alignItems:"center", justifyContent:"center" }}>
+                        <div onClick={toggle} style={{ width:42, height:24, borderRadius:12, background:enabled?"#0ea5e9":"#e2e8f0", transition:"background 0.2s", cursor:"pointer", position:"relative", flexShrink:0 }}>
+                          <div style={{ position:"absolute", top:3, left:enabled?18:3, width:18, height:18, borderRadius:"50%", background:"#fff", boxShadow:"0 1px 3px rgba(0,0,0,0.15)", transition:"left 0.2s" }}/>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
             </div>
-            {/* Footer note */}
-            <div style={{ padding:"14px 24px 18px", background:"#f8fafc", borderTop:"1px solid #f1f5f9" }}>
+
+            <div style={{ padding:"12px 24px 16px", background:"#f8fafc", borderTop:"1px solid #f1f5f9", flexShrink:0 }}>
               <p style={{ margin:0, fontSize:11, color:"#94a3b8", lineHeight:1.6 }}>
-                ℹ Admins always see all tabs regardless of these settings. Changes take effect immediately for all guest users.
+                ℹ Admins always see all tabs. Changes save instantly. Navigate to <strong>Manage Users</strong> below to assign subscriptions to individual users.
               </p>
             </div>
           </div>
         </div>
       )}
+
       {/* Reset Dashboard Confirm Modal */}
       {showResetConfirm && (
         <div style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2000, backdropFilter:"blur(4px)" }}>
